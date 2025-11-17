@@ -9,5 +9,5 @@ new class extends Component
 ?>
 
 <div>
-    THIS IS THE DASHBOARD
+    Welcome to the blank teams starter kit! 
 </div>
