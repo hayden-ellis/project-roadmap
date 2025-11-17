@@ -1,12 +1,11 @@
 <?php
 
+use App\Livewire\Pages\Profile\ShowPage;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
     return view('welcome');
 });
-
-
 
 Route::middleware([
     'auth:sanctum',
@@ -14,4 +13,9 @@ Route::middleware([
     'verified',
 ])->group(function () {
     Route::livewire('/dashboard', 'dashboard')->name('dashboard');
+});
+
+Route::middleware(['auth:sanctum', 'verified'])->group(function () {
+    /* Route::livewire('/user-profile', ShowPage::class)->name('user-profile'); */
+
 });
