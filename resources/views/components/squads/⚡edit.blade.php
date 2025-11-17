@@ -54,7 +54,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 };
 ?>
 
-<div>
+<div class="max-w-3xl">
 
         <form wire:submit="save" >
             <div class="mb-6">

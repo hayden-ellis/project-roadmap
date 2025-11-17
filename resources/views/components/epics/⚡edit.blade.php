@@ -130,7 +130,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 };
 ?>
 
-<div>
+<div class="max-w-4xl">
         <form wire:submit="save">
             <div class="mb-6">
                 <flux:button href="/epics" variant="ghost" icon="arrow-left" wire:navigate>Back to Epics</flux:button>
