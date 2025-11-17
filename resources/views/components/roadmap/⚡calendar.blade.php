@@ -1,0 +1,661 @@
+<?php
+
+use App\Models\Epic;
+use App\Models\Squad;
+use Carbon\Carbon;
+use Carbon\CarbonPeriod;
+use Flux\DateRange;
+use Livewire\Attributes\Layout;
+use Livewire\Component;
+
+new #[Layout('components.layouts.app.sidebar')] class extends Component
+{
+    public DateRange $date_range;
+    public array $selected_squads = [];
+    public string $view_mode = 'months'; // weeks or months
+
+    public function mount(): void
+    {
+        $this->date_range = DateRange::thisQuarter();
+    }
+
+    public function with(): array
+    {
+        $query = auth()->user()->currentTeam
+            ->epics()
+            ->with(['status', 'squads', 'stories.status', 'stories.squad'])
+            ->whereNotNull('start_date')
+            ->whereNotNull('end_date');
+
+        // Filter epics that overlap with the selected date range
+        $query->where('end_date', '>=', $this->date_range->start())
+            ->where('start_date', '<=', $this->date_range->end());
+
+        if (!empty($this->selected_squads)) {
+            $query->whereHas('squads', function ($q) {
+                $q->whereIn('squads.id', $this->selected_squads);
+            });
+        }
+
+        $epics = $query->orderBy('start_date')->get();
+        $squads = auth()->user()->currentTeam->squads()->orderBy('name')->get();
+
+        // Generate calendar periods
+        if ($this->view_mode === 'weeks') {
+            $startDate = $this->date_range->start()->startOfWeek();
+            $endDate = $this->date_range->end()->endOfWeek();
+            $period = CarbonPeriod::create($startDate, '1 day', $endDate);
+            
+            $weeks = [];
+            $currentWeek = [];
+            $weekNumber = 0;
+            
+            foreach ($period as $date) {
+                $currentWeek[] = $date->copy();
+                
+                if ($date->isSunday() || $date->equalTo($endDate)) {
+                    $weeks[$weekNumber] = $currentWeek;
+                    $currentWeek = [];
+                    $weekNumber++;
+                }
+            }
+
+            return [
+                'epics' => $epics,
+                'squads' => $squads,
+                'weeks' => $weeks,
+                'months' => [],
+                'startDate' => $startDate,
+                'endDate' => $endDate,
+            ];
+        } else {
+            // Monthly view
+            $startDate = $this->date_range->start()->startOfMonth();
+            $endDate = $this->date_range->end()->endOfMonth();
+            
+            $months = [];
+            $currentMonth = $startDate->copy();
+            
+            while ($currentMonth <= $endDate) {
+                $months[] = [
+                    'start' => $currentMonth->copy()->startOfMonth(),
+                    'end' => $currentMonth->copy()->endOfMonth(),
+                    'date' => $currentMonth->copy(),
+                ];
+                $currentMonth->addMonth();
+            }
+
+            return [
+                'epics' => $epics,
+                'squads' => $squads,
+                'weeks' => [],
+                'months' => $months,
+                'startDate' => $startDate,
+                'endDate' => $endDate,
+            ];
+        }
+    }
+};
+?>
+
+<div>
+    <div class="flex items-center justify-between mb-6">
+        <div class="flex items-center gap-4">
+            <flux:heading size="xl">Roadmap Calendar</flux:heading>
+            <x-roadmap-navigation currentView="calendar" />
+        </div>
+        <flux:tabs variant="segmented" wire:model.live="view_mode">
+            <flux:tab name="months" icon="calendar-days">Monthly</flux:tab>
+            <flux:tab name="weeks" icon="calendar">Weekly</flux:tab>
+        </flux:tabs>
+    </div>
+
+    <flux:card class="mb-6">
+        <div class="flex items-start gap-12">
+            <flux:date-picker 
+                wire:model.live="date_range"
+                mode="range" 
+                with-presets
+                presets="thisQuarter lastQuarter thisMonth lastMonth last30Days last3Months thisYear yearToDate"
+                >
+                <x-slot name="trigger">
+                    <div class="flex flex-col sm:flex-row gap-4">
+                        <flux:date-picker.input class="mt-2" label="Start" />
+                        <flux:date-picker.input class="mt-2" label="End" />
+                    </div>
+                </x-slot>
+            </flux:date-picker>
+
+            <flux:field>
+                <flux:label>Filter by Squads</flux:label>
+                <div class="flex flex-wrap gap-2 mt-2">
+                    @foreach($squads as $squad)
+                        <label class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer transition-colors {{ in_array($squad->id, $selected_squads) ? 'border-zinc-400 dark:border-zinc-500 bg-zinc-100 dark:bg-zinc-800' : 'border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800' }}">
+                            <input type="checkbox" wire:model.live="selected_squads" value="{{ $squad->id }}" class="rounded border-zinc-300 dark:border-zinc-700" />
+                            <div class="h-3 w-3 rounded-full" style="background-color: {{ $squad->color }}"></div>
+                            <span class="text-sm">{{ $squad->name }}</span>
+                        </label>
+                    @endforeach
+                </div>
+            </flux:field>
+        </div>
+    </flux:card>
+
+    @if($epics->isEmpty())
+        <flux:card>
+            <div class="text-center py-12">
+                <flux:icon.calendar class="mx-auto h-12 w-12 text-zinc-400" />
+                <flux:heading size="lg" class="mt-4">No epics in this date range</flux:heading>
+                <flux:text class="mt-2">Adjust your filters or create a new epic.</flux:text>
+                <flux:button href="/epics/create" variant="primary" class="mt-6" wire:navigate>Create Epic</flux:button>
+            </div>
+        </flux:card>
+    @else
+        <flux:card class="overflow-x-auto">
+            <div class="min-w-max">
+            
+            @if($view_mode === 'weeks')
+                <!-- Month Headers -->
+                <div class="flex border-b-2 border-zinc-300 dark:border-zinc-600">
+                    <div class="w-48 flex-shrink-0 border-r border-zinc-200 dark:border-zinc-700"></div>
+                    <div class="flex-1 flex">
+                        @php
+                            $monthData = [];
+                            $currentMonth = null;
+                            $currentMonthStart = null;
+                            $monthSpan = 0;
+                            
+                            foreach($weeks as $weekIndex => $week) {
+                                $weekMonth = $week[0]->format('Y-m');
+                                
+                                if ($currentMonth !== $weekMonth) {
+                                    // Save the previous month if exists
+                                    if ($currentMonth !== null && $currentMonthStart !== null) {
+                                        $monthData[] = [
+                                            'date' => $currentMonthStart,
+                                            'span' => $monthSpan
+                                        ];
+                                    }
+                                    
+                                    // Start new month
+                                    $currentMonth = $weekMonth;
+                                    $currentMonthStart = $week[0];
+                                    $monthSpan = 1;
+                                } else {
+                                    $monthSpan++;
+                                }
+                            }
+                            
+                            // Add the last month
+                            if ($currentMonth !== null && $currentMonthStart !== null) {
+                                $monthData[] = [
+                                    'date' => $currentMonthStart,
+                                    'span' => $monthSpan
+                                ];
+                            }
+                        @endphp
+                        
+                        @foreach($monthData as $month)
+                            <div class="border-r border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800" style="flex: {{ $month['span'] }}">
+                                <div class="p-3 text-center font-bold text-base">
+                                    {{ $month['date']->format('F Y') }}
+                                </div>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+
+                <!-- Week Headers -->
+                <div class="flex border-b border-zinc-200 dark:border-zinc-700">
+                    <div class="w-48 flex-shrink-0 p-3 font-semibold border-r border-zinc-200 dark:border-zinc-700">
+                        Epic
+                    </div>
+                    <div class="flex-1 flex">
+                        @foreach($weeks as $weekIndex => $week)
+                            <div class="flex-1 min-w-32 border-r border-zinc-200 dark:border-zinc-700">
+                                <div class="p-2 text-center text-sm font-medium text-zinc-600 dark:text-zinc-400">
+                                    Week {{ $weekIndex + 1 }}
+                                </div>
+                                <div class="flex text-xs text-center border-t border-zinc-200 dark:border-zinc-700">
+                                    @foreach($week as $day)
+                                        <div class="flex-1 p-1 {{ $day->isWeekend() ? 'bg-zinc-50 dark:bg-zinc-800' : '' }}">
+                                            <div class="font-medium">{{ $day->format('D') }}</div>
+                                            <div class="text-zinc-500 dark:text-zinc-400">{{ $day->format('j') }}</div>
+                                        </div>
+                                    @endforeach
+                                </div>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+
+                <!-- Epic Rows with Squad Breakdown -->
+        @foreach($epics as $epic)
+            @php
+                // Use pivot data for each squad's dates and story points
+                $squadWork = [];
+                foreach($epic->squads as $squad) {
+                    // If squads are filtered, only include selected squads
+                    if (!empty($this->selected_squads) && !in_array($squad->id, $this->selected_squads)) {
+                        continue;
+                    }
+                    
+                    $squadStartDate = $squad->pivot->start_date ? \Carbon\Carbon::parse($squad->pivot->start_date) : null;
+                    $squadEndDate = $squad->pivot->end_date ? \Carbon\Carbon::parse($squad->pivot->end_date) : null;
+                    
+                    // Only include squad work that overlaps with the selected date range
+                    if ($squadStartDate && $squadEndDate) {
+                        $overlapsWithRange = $squadStartDate <= $this->date_range->end() && $squadEndDate >= $this->date_range->start();
+                        if (!$overlapsWithRange) {
+                            continue;
+                        }
+                    }
+                    
+                    $storyCount = $epic->stories()->where('squad_id', $squad->id)->count();
+                    $squadWork[$squad->id] = [
+                        'squad' => $squad,
+                        'start_date' => $squadStartDate,
+                        'end_date' => $squadEndDate,
+                        'story_points' => $squad->pivot->story_points,
+                        'story_count' => $storyCount,
+                    ];
+                }
+                
+                // Skip epic if no squad work overlaps with selected date range
+                if (empty($squadWork)) {
+                    continue;
+                }
+            @endphp
+
+                    <!-- Compact Epic Header Row -->
+                    <div class="flex border-b-2 border-zinc-300 dark:border-zinc-600 bg-zinc-50 dark:bg-zinc-900">
+                        <div class="w-48 flex-shrink-0 py-1.5 px-3 border-r border-zinc-200 dark:border-zinc-700">
+                            <flux:tooltip :content="$epic->title" class="w-full">
+                                <a href="/epics/{{ $epic->id }}/edit" wire:navigate class="block hover:text-blue-600 dark:hover:text-blue-400">
+                                    <div class="text-sm font-bold truncate text-zinc-900 dark:text-zinc-100">{{ $epic->title }} <span class="text-[10px] font-normal text-zinc-500 dark:text-zinc-400">({{ count($squadWork) }} {{ Str::plural('squad', count($squadWork)) }})</span></div>
+                                </a>
+                            </flux:tooltip>
+                        </div>
+                        <div class="flex-1 flex relative">
+                            <!-- Empty space for epic header -->
+                        </div>
+                    </div>
+
+                    <!-- Squad Rows -->
+                    @foreach($squadWork as $work)
+                        <div class="flex border-b border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
+                    <div class="w-48 flex-shrink-0 p-1.5 border-r border-zinc-200 dark:border-zinc-700 pl-8">
+                        <div class="flex items-center gap-2">
+                            <div class="h-2 w-2 rounded-full flex-shrink-0" style="background-color: {{ $work['squad']->color }}"></div>
+                            <span class="text-xs text-zinc-600 dark:text-zinc-400">{{ $work['squad']->name }}</span>
+                        </div>
+                        <div class="flex items-center gap-2 flex-nowrap whitespace-nowrap mt-1">
+                            @if($work['story_points'])
+                                <div class="text-[10px] text-zinc-500 dark:text-zinc-400 w-8 tabular-nums">
+                                    {{ $work['story_points'] }} {{ Str::plural('pt', $work['story_points']) }}
+                                </div>
+                            @endif
+    
+                            @if($work['story_points'] && $work['start_date'] && $work['end_date'])
+                                <flux:separator vertical class="h-4" />
+                            @endif
+
+                            @if($work['start_date'] && $work['end_date'])
+                                <div class="text-[10px] text-zinc-500 dark:text-zinc-400">
+                                    {{ $work['start_date']->format('M j') }} - {{ $work['end_date']->format('M j') }}
+                                </div>
+                            @endif
+                        </div>
+                    </div>
+                            <div class="flex-1 flex relative" style="min-height: 50px;">
+                                @if($work['start_date'] && $work['end_date'])
+                                    @foreach($weeks as $weekIndex => $week)
+                                        <div class="flex-1 min-w-32 border-r border-zinc-200 dark:border-zinc-700 relative">
+                                            @php
+                                                $weekStart = $week[0];
+                                                $weekEnd = end($week);
+                                                $squadStart = $work['start_date'];
+                                                $squadEnd = $work['end_date'];
+                                                
+                                                // Check if squad's work overlaps with this week AND the selected date range
+                                                $overlapsWithSelectedRange = $squadStart <= $this->date_range->end() && $squadEnd >= $this->date_range->start();
+                                                $overlaps = ($squadStart <= $weekEnd && $squadEnd >= $weekStart) && $overlapsWithSelectedRange;
+                                                
+                                                if ($overlaps) {
+                                                    // Calculate position and width within the week
+                                                    $displayStart = max($squadStart, $weekStart);
+                                                    $displayEnd = min($squadEnd, $weekEnd);
+                                                    
+                                                    // Calculate days from week start
+                                                    $daysFromStart = $weekStart->diffInDays($displayStart);
+                                                    $duration = $displayStart->diffInDays($displayEnd) + 1;
+                                                    
+                                                    // Convert to percentage
+                                                    $leftPercent = ($daysFromStart / 7) * 100;
+                                                    $widthPercent = ($duration / 7) * 100;
+                                                    
+                                                    // Check if this is the first week
+                                                    $isFirstWeek = $weekIndex === 0 || $squadStart >= $weekStart;
+                                                    // Check if this is the last week
+                                                    $isLastWeek = $squadEnd <= $weekEnd;
+                                                }
+                                            @endphp
+                                            
+                                            @if($overlaps)
+                                                <flux:dropdown position="top" align="start">
+                                                    <button type="button" class="absolute top-2 bottom-2 rounded-lg flex items-center px-2 text-white text-xs font-medium shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+                                                        style="left: {{ $leftPercent }}%; width: {{ $widthPercent }}%; background-color: {{ $work['squad']->color }}; {{ !$isFirstWeek ? 'border-top-left-radius: 0; border-bottom-left-radius: 0;' : '' }} {{ !$isLastWeek ? 'border-top-right-radius: 0; border-bottom-right-radius: 0;' : '' }}">
+                                                        @if($isFirstWeek && $work['story_points'])
+                                                            <span class="truncate">{{ $work['story_points'] }} pts</span>
+                                                        @elseif($isFirstWeek && $work['story_count'] > 0)
+                                                            <span class="truncate">{{ $work['story_count'] }} {{ Str::plural('story', $work['story_count']) }}</span>
+                                                        @endif
+                                                    </button>
+                                                    <flux:popover class="w-80">
+                                                        <div class="flex flex-col gap-4">
+                                                            <div>
+                                                                <flux:heading size="lg">{{ $epic->title }}</flux:heading>
+                                                                <flux:badge :color="$epic->status->slug === 'completed' ? 'green' : ($epic->status->slug === 'in-progress' ? 'blue' : ($epic->status->slug === 'blocked' ? 'red' : 'zinc'))" class="mt-2">
+                                                                    {{ $epic->status->name }}
+                                                                </flux:badge>
+                                                            </div>
+                                                            
+                                                            @if($epic->description)
+                                                            <flux:text class="text-sm">{{ $epic->description }}</flux:text>
+                                                            @endif
+
+                                                            <flux:separator variant="subtle" />
+                                                            
+                                                            <div class="space-y-3">
+                                                                <div>
+                                                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Squad</flux:text>
+                                                                    <div class="flex items-center gap-2 mt-1">
+                                                                        <div class="h-3 w-3 rounded-full" style="background-color: {{ $work['squad']->color }}"></div>
+                                                                        <flux:text>{{ $work['squad']->name }}</flux:text>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div>
+                                                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Timeline</flux:text>
+                                                                    <flux:text class="mt-1">{{ $squadStart->format('M j, Y') }} - {{ $squadEnd->format('M j, Y') }}</flux:text>
+                                                                </div>
+
+                                                                @if($work['story_points'])
+                                                                <div>
+                                                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Story Points</flux:text>
+                                                                    <flux:text class="mt-1">{{ $work['story_points'] }} {{ Str::plural('point', $work['story_points']) }}</flux:text>
+                                                                </div>
+                                                                @endif
+
+                                                                @if($work['story_count'] > 0)
+                                                                <div>
+                                                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Stories</flux:text>
+                                                                    <flux:text class="mt-1">{{ $work['story_count'] }} {{ Str::plural('story', $work['story_count']) }}</flux:text>
+                                                                </div>
+                                                                @endif
+
+                                                                @if($epic->squads->count() > 1)
+                                                                <div>
+                                                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">All Squads</flux:text>
+                                                                    <div class="flex flex-wrap gap-1.5 mt-1">
+                                                                        @foreach($epic->squads as $squad)
+                                                                        <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs" style="background-color: {{ $squad->color }}20; color: {{ $squad->color }}">
+                                                                            <div class="h-1.5 w-1.5 rounded-full" style="background-color: {{ $squad->color }}"></div>
+                                                                            {{ $squad->name }}
+                                                                        </span>
+                                                                        @endforeach
+                                                                    </div>
+                                                                </div>
+                                                                @endif
+                                                            </div>
+
+                                                            <flux:separator variant="subtle" />
+
+                                                            <flux:button href="/epics/{{ $epic->id }}/edit" wire:navigate variant="primary" size="sm" icon="pencil">
+                                                                Edit Epic
+                                                            </flux:button>
+                                                        </div>
+                                                    </flux:popover>
+                                                </flux:dropdown>
+                                            @endif
+                                        </div>
+                                    @endforeach
+                                @endif
+                            </div>
+                        </div>
+                    @endforeach
+                @endforeach
+            
+            @else
+                {{-- Monthly View --}}
+                <!-- Month Headers -->
+                <div class="flex border-b-2 border-zinc-300 dark:border-zinc-600">
+                    <div class="w-48 flex-shrink-0 p-3 font-semibold border-r border-zinc-200 dark:border-zinc-700">
+                        Epic
+                    </div>
+                    <div class="flex-1 flex">
+                        @foreach($months as $month)
+                            <div class="flex-1 min-w-40 border-r border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800">
+                                <div class="p-3 text-center font-bold text-base">
+                                    {{ $month['date']->format('M Y') }}
+                                </div>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+
+                <!-- Epic Rows with Squad Breakdown -->
+                @foreach($epics as $epic)
+                    @php
+                        // Use pivot data for each squad's dates and story points
+                        $squadWork = [];
+                        foreach($epic->squads as $squad) {
+                            // If squads are filtered, only include selected squads
+                            if (!empty($this->selected_squads) && !in_array($squad->id, $this->selected_squads)) {
+                                continue;
+                            }
+                            
+                            $squadStartDate = $squad->pivot->start_date ? \Carbon\Carbon::parse($squad->pivot->start_date) : null;
+                            $squadEndDate = $squad->pivot->end_date ? \Carbon\Carbon::parse($squad->pivot->end_date) : null;
+                            
+                            // Only include squad work that overlaps with the selected date range
+                            if ($squadStartDate && $squadEndDate) {
+                                $overlapsWithRange = $squadStartDate <= $this->date_range->end() && $squadEndDate >= $this->date_range->start();
+                                if (!$overlapsWithRange) {
+                                    continue;
+                                }
+                            }
+                            
+                            $storyCount = $epic->stories()->where('squad_id', $squad->id)->count();
+                            $squadWork[$squad->id] = [
+                                'squad' => $squad,
+                                'start_date' => $squadStartDate,
+                                'end_date' => $squadEndDate,
+                                'story_points' => $squad->pivot->story_points,
+                                'story_count' => $storyCount,
+                            ];
+                        }
+                        
+                        // Skip epic if no squad work overlaps with selected date range
+                        if (empty($squadWork)) {
+                            continue;
+                        }
+                    @endphp
+
+                    <!-- Compact Epic Header Row -->
+                    <div class="flex border-b-2 border-zinc-300 dark:border-zinc-600 bg-zinc-50 dark:bg-zinc-900">
+                        <div class="w-48 flex-shrink-0 py-1.5 px-3 border-r border-zinc-200 dark:border-zinc-700">
+                            <flux:tooltip :content="$epic->title" class="w-full">
+                                <a href="/epics/{{ $epic->id }}/edit" wire:navigate class="block hover:text-blue-600 dark:hover:text-blue-400">
+                                    <div class="text-sm font-bold truncate text-zinc-900 dark:text-zinc-100">{{ $epic->title }} <span class="text-[10px] font-normal text-zinc-500 dark:text-zinc-400">({{ count($squadWork) }} {{ Str::plural('squad', count($squadWork)) }})</span></div>
+                                </a>
+                            </flux:tooltip>
+                        </div>
+                        <div class="flex-1 flex relative">
+                            <!-- Empty space for epic header -->
+                        </div>
+                    </div>
+
+                    <!-- Squad Rows -->
+                    @foreach($squadWork as $work)
+                        <div class="flex border-b border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
+                            <div class="w-48 flex-shrink-0 p-1.5 border-r border-zinc-200 dark:border-zinc-800 pl-6">
+                                <div class="flex items-center gap-2">
+                                    <div class="h-2 w-2 rounded-full flex-shrink-0" style="background-color: {{ $work['squad']->color }}"></div>
+                                    <span class="text-xs text-zinc-600 dark:text-zinc-400">{{ $work['squad']->name }}</span>
+                                </div>
+                                <div class="flex items-center gap-2 flex-nowrap whitespace-nowrap mt-1">
+                                    @if($work['story_points'])
+                                        <div class="text-[10px] text-zinc-500 dark:text-zinc-400 w-8 tabular-nums">
+                                            {{ $work['story_points'] }} {{ Str::plural('pt', $work['story_points']) }}
+                                        </div>
+                                    @endif
+            
+                                    @if($work['story_points'] && $work['start_date'] && $work['end_date'])
+                                        <flux:separator vertical class="h-4" />
+                                    @endif
+
+                                    @if($work['start_date'] && $work['end_date'])
+                                        <div class="text-[10px] text-zinc-500 dark:text-zinc-400">
+                                            {{ $work['start_date']->format('M j') }} - {{ $work['end_date']->format('M j') }}
+                                        </div>
+                                    @endif
+                                </div>
+                            </div>
+                            <div class="flex-1 flex relative" style="min-height: 50px;">
+                                @if($work['start_date'] && $work['end_date'])
+                                    @foreach($months as $monthIndex => $month)
+                                        <div class="flex-1 min-w-40 border-r border-zinc-200 dark:border-zinc-800 relative">
+                                            @php
+                                                $monthStart = $month['start'];
+                                                $monthEnd = $month['end'];
+                                                $squadStart = $work['start_date'];
+                                                $squadEnd = $work['end_date'];
+                                                
+                                                // Check if squad's work overlaps with this month AND the selected date range
+                                                $overlapsWithSelectedRange = $squadStart <= $this->date_range->end() && $squadEnd >= $this->date_range->start();
+                                                $overlaps = ($squadStart <= $monthEnd && $squadEnd >= $monthStart) && $overlapsWithSelectedRange;
+                                                
+                                                if ($overlaps) {
+                                                    // Calculate position and width within the month
+                                                    $displayStart = max($squadStart, $monthStart);
+                                                    $displayEnd = min($squadEnd, $monthEnd);
+                                                    
+                                                    // Calculate days from month start
+                                                    $daysInMonth = $monthStart->daysInMonth;
+                                                    $daysFromStart = $monthStart->diffInDays($displayStart);
+                                                    $duration = $displayStart->diffInDays($displayEnd) + 1;
+                                                    
+                                                    // Convert to percentage
+                                                    $leftPercent = ($daysFromStart / $daysInMonth) * 100;
+                                                    $widthPercent = ($duration / $daysInMonth) * 100;
+                                                    
+                                                    // Check if this is the first month
+                                                    $isFirstMonth = $monthIndex === 0 || $squadStart >= $monthStart;
+                                                    // Check if this is the last month
+                                                    $isLastMonth = $squadEnd <= $monthEnd;
+                                                }
+                                            @endphp
+                                            
+                                            @if($overlaps)
+                                                <flux:dropdown position="top" align="start">
+                                                    <button type="button" class="absolute top-2 bottom-2 rounded-lg flex items-center justify-center px-2 text-white text-xs font-medium shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+                                                        style="left: {{ $leftPercent }}%; width: {{ $widthPercent }}%; background-color: {{ $work['squad']->color }}; {{ !$isFirstMonth ? 'border-top-left-radius: 0; border-bottom-left-radius: 0;' : '' }} {{ !$isLastMonth ? 'border-top-right-radius: 0; border-bottom-right-radius: 0;' : '' }}">
+                                                        @if($isFirstMonth && $work['story_points'])
+                                                            <span class="truncate">{{ $work['story_points'] }} pts</span>
+                                                        @elseif($isFirstMonth && $work['story_count'] > 0)
+                                                            <span class="truncate">{{ $work['story_count'] }} {{ Str::plural('story', $work['story_count']) }}</span>
+                                                        @endif
+                                                    </button>
+                                                    <flux:popover class="w-80">
+                                                        <div class="flex flex-col gap-4">
+                                                            <div>
+                                                                <flux:heading size="lg">{{ $epic->title }}</flux:heading>
+                                                                <flux:badge :color="$epic->status->slug === 'completed' ? 'green' : ($epic->status->slug === 'in-progress' ? 'blue' : ($epic->status->slug === 'blocked' ? 'red' : 'zinc'))" class="mt-2">
+                                                                    {{ $epic->status->name }}
+                                                                </flux:badge>
+                                                            </div>
+                                                            
+                                                            @if($epic->description)
+                                                            <flux:text class="text-sm">{{ $epic->description }}</flux:text>
+                                                            @endif
+
+                                                            <flux:separator variant="subtle" />
+                                                            
+                                                            <div class="space-y-3">
+                                                                <div>
+                                                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Squad</flux:text>
+                                                                    <div class="flex items-center gap-2 mt-1">
+                                                                        <div class="h-3 w-3 rounded-full" style="background-color: {{ $work['squad']->color }}"></div>
+                                                                        <flux:text>{{ $work['squad']->name }}</flux:text>
+                                                                    </div>
+                                                                </div>
+
+                                                                <div>
+                                                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Timeline</flux:text>
+                                                                    <flux:text class="mt-1">{{ $squadStart->format('M j, Y') }} - {{ $squadEnd->format('M j, Y') }}</flux:text>
+                                                                </div>
+
+                                                                @if($work['story_points'])
+                                                                <div>
+                                                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Story Points</flux:text>
+                                                                    <flux:text class="mt-1">{{ $work['story_points'] }} {{ Str::plural('point', $work['story_points']) }}</flux:text>
+                                                                </div>
+                                                                @endif
+
+                                                                @if($work['story_count'] > 0)
+                                                                <div>
+                                                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Stories</flux:text>
+                                                                    <flux:text class="mt-1">{{ $work['story_count'] }} {{ Str::plural('story', $work['story_count']) }}</flux:text>
+                                                                </div>
+                                                                @endif
+
+                                                                @if($epic->squads->count() > 1)
+                                                                <div>
+                                                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">All Squads</flux:text>
+                                                                    <div class="flex flex-wrap gap-1.5 mt-1">
+                                                                        @foreach($epic->squads as $squad)
+                                                                        <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs" style="background-color: {{ $squad->color }}20; color: {{ $squad->color }}">
+                                                                            <div class="h-1.5 w-1.5 rounded-full" style="background-color: {{ $squad->color }}"></div>
+                                                                            {{ $squad->name }}
+                                                                        </span>
+                                                                        @endforeach
+                                                                    </div>
+                                                                </div>
+                                                                @endif
+                                                            </div>
+
+                                                            <flux:separator variant="subtle" />
+
+                                                            <flux:button href="/epics/{{ $epic->id }}/edit" wire:navigate variant="primary" size="sm" icon="pencil">
+                                                                Edit Epic
+                                                            </flux:button>
+                                                        </div>
+                                                    </flux:popover>
+                                                </flux:dropdown>
+                                            @endif
+                                        </div>
+                                    @endforeach
+                                @endif
+                            </div>
+                        </div>
+                    @endforeach
+                @endforeach
+            @endif
+            
+            </div>
+        </flux:card>
+
+        <!-- Legend -->
+        <div class="mt-6 flex items-center gap-6 text-sm">
+            <div class="font-semibold">Legend:</div>
+            @foreach($squads as $squad)
+                <div class="flex items-center gap-2">
+                    <div class="h-4 w-4 rounded" style="background-color: {{ $squad->color }}"></div>
+                    <span>{{ $squad->name }}</span>
+                </div>
+            @endforeach
+        </div>
+    @endif
+</div>
+

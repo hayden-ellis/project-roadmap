@@ -18,6 +18,20 @@
   --font-sans: Inter, sans-serif;
 }
 
+@theme {
+  --color-accent: var(--color-cyan-600);
+  --color-accent-content: var(--color-cyan-600);
+  --color-accent-foreground: var(--color-white);
+}
+
+@layer theme {
+  .dark {
+      --color-accent: var(--color-cyan-600);
+      --color-accent-content: var(--color-cyan-400);
+      --color-accent-foreground: var(--color-white);
+  }
+}
+
 @custom-variant dark (&:where(.dark, .dark *));
 /*
   The default border color has changed to `currentcolor` in Tailwind CSS v4,

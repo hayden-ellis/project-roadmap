@@ -1,5 +1,5 @@
 @if (Laravel\Jetstream\Jetstream::hasTeamFeatures())
-<div class="max-lg:hidden mb-1">
+<div class="mb-1">
     <flux:dropdown position="bottom" align="start" class="w-full">
         <button type="button" class="w-full group flex items-center p-1 rounded-lg gap-2 hover:bg-zinc-800/5 dark:hover:bg-white/10 transition-colors in-data-flux-sidebar-collapsed-desktop:mx-0 in-data-flux-sidebar-collapsed-desktop:px-0 in-data-flux-sidebar-collapsed-desktop:py-2 in-data-flux-sidebar-collapsed-desktop:border-0 in-data-flux-sidebar-collapsed-desktop:bg-transparent in-data-flux-sidebar-collapsed-desktop:justify-center">
             <div class="flex items-center justify-center size-8 rounded-md bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 shrink-0 in-data-flux-sidebar-collapsed-desktop:bg-transparent in-data-flux-sidebar-collapsed-desktop:rounded-lg in-data-flux-sidebar-collapsed-desktop:hover:bg-zinc-800/5 in-data-flux-sidebar-collapsed-desktop:dark:hover:bg-white/10">

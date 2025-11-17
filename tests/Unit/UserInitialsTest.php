@@ -39,9 +39,7 @@ it('falls back to email first letter when name is empty', function (): void {
 });
 
 it('returns empty string when both name and email are missing', function (): void {
-    $user = new User();
+    $user = new User;
 
     expect($user->initials())->toBe('');
 });
-
-

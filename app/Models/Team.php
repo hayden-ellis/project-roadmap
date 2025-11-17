@@ -45,4 +45,14 @@ class Team extends JetstreamTeam
             'personal_team' => 'boolean',
         ];
     }
+
+    public function squads(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(Squad::class);
+    }
+
+    public function epics(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(Epic::class);
+    }
 }
