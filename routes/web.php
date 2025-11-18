@@ -1,11 +1,18 @@
 <?php
 
+use App\Http\Controllers\GoogleAuthController;
 use App\Livewire\Pages\Profile\ShowPage;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
     return view('welcome');
 });
+
+// Route to redirect to Google's OAuth page
+Route::get('/auth/google/redirect', [GoogleAuthController::class, 'redirect'])->name('auth.google.redirect');
+
+// Route to handle the callback from Google
+Route::get('/auth/google/callback', [GoogleAuthController::class, 'callback'])->name('auth.google.callback');
 
 Route::middleware([
     'auth:sanctum',

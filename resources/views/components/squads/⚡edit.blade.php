@@ -66,7 +66,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             <flux:card class="space-y-6">
                 <flux:field>
                     <flux:label>Name</flux:label>
-                    <flux:input wire:model="name" placeholder="e.g., Charging, Pricing, Payments" />
+                    <flux:input wire:model="name" placeholder="e.g., Frontend, Backend, Mobile" />
                     <flux:error name="name" />
                 </flux:field>
 
