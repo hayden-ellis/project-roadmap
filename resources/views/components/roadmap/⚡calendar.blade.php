@@ -98,8 +98,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 ?>
 
 <div>
-    <div class="flex items-center justify-between mb-6">
-        <div class="flex items-center gap-4">
+    <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 md:gap-0 mb-6">
+        <div class="flex flex-col md:flex-row items-start md:items-center gap-4">
             <flux:heading size="xl">Roadmap Calendar</flux:heading>
             <x-roadmap-navigation currentView="calendar" />
         </div>
@@ -110,7 +110,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     </div>
 
     <flux:card class="mb-6">
-        <div class="flex items-start gap-12">
+        <div class="flex flex-col md:flex-row items-start md:items-center gap-4 md:gap-12">
             <flux:date-picker 
                 wire:model.live="date_range"
                 mode="range" 
@@ -150,7 +150,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             </div>
         </flux:card>
     @else
-        <flux:card class="overflow-x-auto">
+        <div class="overflow-x-auto">
             <div class="min-w-max">
             
             @if($view_mode === 'weeks')
@@ -206,7 +206,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
                 <!-- Week Headers -->
                 <div class="flex border-b border-zinc-200 dark:border-zinc-700">
-                    <div class="w-48 flex-shrink-0 p-3 font-semibold border-r border-zinc-200 dark:border-zinc-700">
+                    <div class="w-48 flex-shrink-0 p-3 font-semibold border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-white dark:bg-zinc-950 shadow-[2px_0_4px_rgba(0,0,0,0.05)]">
                         Epic
                     </div>
                     <div class="flex-1 flex">
@@ -268,7 +268,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
                     <!-- Compact Epic Header Row -->
                     <div class="flex border-b-2 border-zinc-300 dark:border-zinc-600 bg-zinc-50 dark:bg-zinc-900">
-                        <div class="w-48 flex-shrink-0 py-1.5 px-3 border-r border-zinc-200 dark:border-zinc-700">
+                        <div class="w-48 flex-shrink-0 py-1.5 px-3 border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-zinc-50 dark:bg-zinc-900 shadow-[2px_0_4px_rgba(0,0,0,0.05)]">
                             <flux:tooltip :content="$epic->title" class="w-full">
                                 <a href="/epics/{{ $epic->id }}/edit" wire:navigate class="block hover:text-blue-600 dark:hover:text-blue-400">
                                     <div class="text-sm font-bold truncate text-zinc-900 dark:text-zinc-100">{{ $epic->title }} <span class="text-[10px] font-normal text-zinc-500 dark:text-zinc-400">({{ count($squadWork) }} {{ Str::plural('squad', count($squadWork)) }})</span></div>
@@ -283,7 +283,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     <!-- Squad Rows -->
                     @foreach($squadWork as $work)
                         <div class="flex border-b border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
-                    <div class="w-48 flex-shrink-0 p-1.5 border-r border-zinc-200 dark:border-zinc-700 pl-8">
+                    <div class="w-48 flex-shrink-0 p-1.5 border-r border-zinc-200 dark:border-zinc-700 pl-8 sticky left-0 z-10 bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 shadow-[2px_0_4px_rgba(0,0,0,0.05)]">
                         <div class="flex items-center gap-2">
                             <div class="h-2 w-2 rounded-full flex-shrink-0" style="background-color: {{ $work['squad']->color }}"></div>
                             <span class="text-xs text-zinc-600 dark:text-zinc-400">{{ $work['squad']->name }}</span>
@@ -313,7 +313,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                         $firstVisibleWeek = null;
                                     @endphp
                                     @foreach($weeks as $weekIndex => $week)
-                                        <div class="flex-1 min-w-32 border-r border-zinc-200 dark:border-zinc-700 relative">
+                                        <div class="flex-1 min-w-32 border-r border-zinc-200 dark:border-zinc-700 relative overflow-visible">
                                             @php
                                                 $weekStart = $week[0];
                                                 $weekEnd = end($week);
@@ -342,8 +342,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                                     $leftPercent = ($daysFromStart / 7) * 100;
                                                     $widthPercent = ($duration / 7) * 100;
                                                     
-                                                    // Show label on first segment with enough space (at least 20% width)
-                                                    $hasEnoughSpace = $widthPercent >= 20;
+                                                    // Show label on first segment with enough space (at least 30% width)
+                                                    $hasEnoughSpace = $widthPercent >= 30;
                                                     $shouldShowLabel = !$labelShown && $hasEnoughSpace;
                                                     if ($shouldShowLabel) {
                                                         $labelShown = true;
@@ -442,7 +442,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 {{-- Monthly View --}}
                 <!-- Month Headers -->
                 <div class="flex border-b-2 border-zinc-300 dark:border-zinc-600">
-                    <div class="w-48 flex-shrink-0 p-3 font-semibold border-r border-zinc-200 dark:border-zinc-700">
+                    <div class="w-48 flex-shrink-0 p-3 font-semibold border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-white dark:bg-zinc-950 shadow-[2px_0_4px_rgba(0,0,0,0.05)]">
                         Epic
                     </div>
                     <div class="flex-1 flex">
@@ -496,7 +496,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
                     <!-- Compact Epic Header Row -->
                     <div class="flex border-b-2 border-zinc-300 dark:border-zinc-600 bg-zinc-50 dark:bg-zinc-900">
-                        <div class="w-48 flex-shrink-0 py-1.5 px-3 border-r border-zinc-200 dark:border-zinc-700">
+                        <div class="w-48 flex-shrink-0 py-1.5 px-3 border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-zinc-50 dark:bg-zinc-900 shadow-[2px_0_4px_rgba(0,0,0,0.05)]">
                             <flux:tooltip :content="$epic->title" class="w-full">
                                 <a href="/epics/{{ $epic->id }}/edit" wire:navigate class="block hover:text-blue-600 dark:hover:text-blue-400">
                                     <div class="text-sm font-bold truncate text-zinc-900 dark:text-zinc-100">{{ $epic->title }} <span class="text-[10px] font-normal text-zinc-500 dark:text-zinc-400">({{ count($squadWork) }} {{ Str::plural('squad', count($squadWork)) }})</span></div>
@@ -511,7 +511,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     <!-- Squad Rows -->
                     @foreach($squadWork as $work)
                         <div class="flex border-b border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
-                            <div class="w-48 flex-shrink-0 p-1.5 border-r border-zinc-200 dark:border-zinc-800 pl-6">
+                            <div class="w-48 flex-shrink-0 p-1.5 border-r border-zinc-200 dark:border-zinc-800 pl-6 sticky left-0 z-10 bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 shadow-[2px_0_4px_rgba(0,0,0,0.05)]">
                                 <div class="flex items-center gap-2">
                                     <div class="h-2 w-2 rounded-full flex-shrink-0" style="background-color: {{ $work['squad']->color }}"></div>
                                     <span class="text-xs text-zinc-600 dark:text-zinc-400">{{ $work['squad']->name }}</span>
@@ -669,10 +669,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             @endif
             
             </div>
-        </flux:card>
+        </div>
 
         <!-- Legend -->
-        <div class="mt-6 flex items-center gap-6 text-sm">
+        <div class="mt-6 flex flex-wrap items-center gap-4 text-sm">
             <div class="font-semibold">Legend:</div>
             @foreach($squads as $squad)
                 <div class="flex items-center gap-2">
