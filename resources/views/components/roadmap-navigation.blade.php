@@ -8,11 +8,5 @@
         wire:navigate>
         Calendar View
     </flux:button>
-<!--     <flux:button 
-        href="{{ route('roadmap.timeline') }}" 
-        variant="{{ $currentView === 'timeline' ? 'primary' : 'ghost' }}" 
-        size="sm" 
-        wire:navigate>
-        Timeline View
-    </flux:button> -->
+    {{-- Timeline View --}}
 </div>
