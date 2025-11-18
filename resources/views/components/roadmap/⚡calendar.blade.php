@@ -1,8 +1,5 @@
 <?php
 
-use App\Models\Epic;
-use App\Models\Squad;
-use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Flux\DateRange;
 use Livewire\Attributes\Layout;
@@ -11,7 +8,9 @@ use Livewire\Component;
 new #[Layout('components.layouts.app.sidebar')] class extends Component
 {
     public DateRange $date_range;
+
     public array $selected_squads = [];
+
     public string $view_mode = 'months'; // weeks or months
 
     public function mount(): void
@@ -31,7 +30,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $query->where('end_date', '>=', $this->date_range->start())
             ->where('start_date', '<=', $this->date_range->end());
 
-        if (!empty($this->selected_squads)) {
+        if (! empty($this->selected_squads)) {
             $query->whereHas('squads', function ($q) {
                 $q->whereIn('squads.id', $this->selected_squads);
             });
@@ -45,14 +44,14 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             $startDate = $this->date_range->start()->startOfWeek();
             $endDate = $this->date_range->end()->endOfWeek();
             $period = CarbonPeriod::create($startDate, '1 day', $endDate);
-            
+
             $weeks = [];
             $currentWeek = [];
             $weekNumber = 0;
-            
+
             foreach ($period as $date) {
                 $currentWeek[] = $date->copy();
-                
+
                 if ($date->isSunday() || $date->equalTo($endDate)) {
                     $weeks[$weekNumber] = $currentWeek;
                     $currentWeek = [];
@@ -72,10 +71,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             // Monthly view
             $startDate = $this->date_range->start()->startOfMonth();
             $endDate = $this->date_range->end()->endOfMonth();
-            
+
             $months = [];
             $currentMonth = $startDate->copy();
-            
+
             while ($currentMonth <= $endDate) {
                 $months[] = [
                     'start' => $currentMonth->copy()->startOfMonth(),
@@ -309,6 +308,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     </div>
                             <div class="flex-1 flex relative" style="min-height: 50px;">
                                 @if($work['start_date'] && $work['end_date'])
+                                    @php
+                                        $labelShown = false;
+                                        $firstVisibleWeek = null;
+                                    @endphp
                                     @foreach($weeks as $weekIndex => $week)
                                         <div class="flex-1 min-w-32 border-r border-zinc-200 dark:border-zinc-700 relative">
                                             @php
@@ -322,6 +325,11 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                                 $overlaps = ($squadStart <= $weekEnd && $squadEnd >= $weekStart) && $overlapsWithSelectedRange;
                                                 
                                                 if ($overlaps) {
+                                                    // Track the first visible week for rounded corners
+                                                    if ($firstVisibleWeek === null) {
+                                                        $firstVisibleWeek = $weekIndex;
+                                                    }
+                                                    
                                                     // Calculate position and width within the week
                                                     $displayStart = max($squadStart, $weekStart);
                                                     $displayEnd = min($squadEnd, $weekEnd);
@@ -334,8 +342,14 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                                     $leftPercent = ($daysFromStart / 7) * 100;
                                                     $widthPercent = ($duration / 7) * 100;
                                                     
-                                                    // Check if this is the first week
-                                                    $isFirstWeek = $weekIndex === 0 || $squadStart >= $weekStart;
+                                                    // Show label on first segment with enough space (at least 20% width)
+                                                    $hasEnoughSpace = $widthPercent >= 20;
+                                                    $shouldShowLabel = !$labelShown && $hasEnoughSpace;
+                                                    if ($shouldShowLabel) {
+                                                        $labelShown = true;
+                                                    }
+                                                    
+                                                    $isFirstVisibleWeek = $weekIndex === $firstVisibleWeek;
                                                     // Check if this is the last week
                                                     $isLastWeek = $squadEnd <= $weekEnd;
                                                 }
@@ -343,12 +357,17 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                             
                                             @if($overlaps)
                                                 <flux:dropdown position="top" align="start">
-                                                    <button type="button" class="absolute top-2 bottom-2 rounded-lg flex items-center px-2 text-white text-xs font-medium shadow-sm hover:shadow-md transition-shadow cursor-pointer"
-                                                        style="left: {{ $leftPercent }}%; width: {{ $widthPercent }}%; background-color: {{ $work['squad']->color }}; {{ !$isFirstWeek ? 'border-top-left-radius: 0; border-bottom-left-radius: 0;' : '' }} {{ !$isLastWeek ? 'border-top-right-radius: 0; border-bottom-right-radius: 0;' : '' }}">
-                                                        @if($isFirstWeek && $work['story_points'])
+                                                    <button type="button" class="absolute top-2 bottom-2 rounded-lg flex items-center gap-2 px-2 text-white text-xs font-medium shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+                                                        style="left: {{ $leftPercent }}%; width: {{ $widthPercent }}%; background-color: {{ $work['squad']->color }}; {{ !$isFirstVisibleWeek ? 'border-top-left-radius: 0; border-bottom-left-radius: 0;' : '' }} {{ !$isLastWeek ? 'border-top-right-radius: 0; border-bottom-right-radius: 0;' : '' }}">
+                                                        @if($shouldShowLabel && $work['story_points'])
+                                                            @php
+                                                                $points = $work['story_points'];
+                                                                $tshirtSize = $points <= 10 ? 'XS' : ($points <= 20 ? 'SM' : ($points <= 40 ? 'M' : ($points <= 80 ? 'L' : ($points <= 100 ? 'XL' : 'XXL'))));
+                                                            @endphp
+                                                            <span class="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-white/25 border border-white/40 backdrop-blur-sm">
+                                                                {{ $tshirtSize }}
+                                                            </span>
                                                             <span class="truncate">{{ $work['story_points'] }} pts</span>
-                                                        @elseif($isFirstWeek && $work['story_count'] > 0)
-                                                            <span class="truncate">{{ $work['story_count'] }} {{ Str::plural('story', $work['story_count']) }}</span>
                                                         @endif
                                                     </button>
                                                     <flux:popover class="w-80">
@@ -384,13 +403,6 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                                                 <div>
                                                                     <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Story Points</flux:text>
                                                                     <flux:text class="mt-1">{{ $work['story_points'] }} {{ Str::plural('point', $work['story_points']) }}</flux:text>
-                                                                </div>
-                                                                @endif
-
-                                                                @if($work['story_count'] > 0)
-                                                                <div>
-                                                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Stories</flux:text>
-                                                                    <flux:text class="mt-1">{{ $work['story_count'] }} {{ Str::plural('story', $work['story_count']) }}</flux:text>
                                                                 </div>
                                                                 @endif
 
@@ -524,6 +536,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                             </div>
                             <div class="flex-1 flex relative" style="min-height: 50px;">
                                 @if($work['start_date'] && $work['end_date'])
+                                    @php
+                                        $labelShown = false;
+                                        $firstVisibleMonth = null;
+                                    @endphp
                                     @foreach($months as $monthIndex => $month)
                                         <div class="flex-1 min-w-40 border-r border-zinc-200 dark:border-zinc-800 relative">
                                             @php
@@ -537,6 +553,11 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                                 $overlaps = ($squadStart <= $monthEnd && $squadEnd >= $monthStart) && $overlapsWithSelectedRange;
                                                 
                                                 if ($overlaps) {
+                                                    // Track the first visible month for rounded corners
+                                                    if ($firstVisibleMonth === null) {
+                                                        $firstVisibleMonth = $monthIndex;
+                                                    }
+                                                    
                                                     // Calculate position and width within the month
                                                     $displayStart = max($squadStart, $monthStart);
                                                     $displayEnd = min($squadEnd, $monthEnd);
@@ -550,8 +571,14 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                                     $leftPercent = ($daysFromStart / $daysInMonth) * 100;
                                                     $widthPercent = ($duration / $daysInMonth) * 100;
                                                     
-                                                    // Check if this is the first month
-                                                    $isFirstMonth = $monthIndex === 0 || $squadStart >= $monthStart;
+                                                    // Show label on first segment with enough space (at least 15% width for monthly view)
+                                                    $hasEnoughSpace = $widthPercent >= 15;
+                                                    $shouldShowLabel = !$labelShown && $hasEnoughSpace;
+                                                    if ($shouldShowLabel) {
+                                                        $labelShown = true;
+                                                    }
+                                                    
+                                                    $isFirstVisibleMonth = $monthIndex === $firstVisibleMonth;
                                                     // Check if this is the last month
                                                     $isLastMonth = $squadEnd <= $monthEnd;
                                                 }
@@ -559,12 +586,17 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                             
                                             @if($overlaps)
                                                 <flux:dropdown position="top" align="start">
-                                                    <button type="button" class="absolute top-2 bottom-2 rounded-lg flex items-center justify-center px-2 text-white text-xs font-medium shadow-sm hover:shadow-md transition-shadow cursor-pointer"
-                                                        style="left: {{ $leftPercent }}%; width: {{ $widthPercent }}%; background-color: {{ $work['squad']->color }}; {{ !$isFirstMonth ? 'border-top-left-radius: 0; border-bottom-left-radius: 0;' : '' }} {{ !$isLastMonth ? 'border-top-right-radius: 0; border-bottom-right-radius: 0;' : '' }}">
-                                                        @if($isFirstMonth && $work['story_points'])
+                                                    <button type="button" class="absolute top-2 bottom-2 rounded-lg flex items-center justify-center gap-2 px-2 text-white text-xs font-medium shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+                                                        style="left: {{ $leftPercent }}%; width: {{ $widthPercent }}%; background-color: {{ $work['squad']->color }}; {{ !$isFirstVisibleMonth ? 'border-top-left-radius: 0; border-bottom-left-radius: 0;' : '' }} {{ !$isLastMonth ? 'border-top-right-radius: 0; border-bottom-right-radius: 0;' : '' }}">
+                                                        @if($shouldShowLabel && $work['story_points'])
+                                                            @php
+                                                                $points = $work['story_points'];
+                                                                $tshirtSize = $points <= 10 ? 'XS' : ($points <= 20 ? 'SM' : ($points <= 40 ? 'M' : ($points <= 80 ? 'L' : ($points <= 100 ? 'XL' : 'XXL'))));
+                                                            @endphp
+                                                            <span class="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-white/25 border border-white/40 backdrop-blur-sm">
+                                                                {{ $tshirtSize }}
+                                                            </span>
                                                             <span class="truncate">{{ $work['story_points'] }} pts</span>
-                                                        @elseif($isFirstMonth && $work['story_count'] > 0)
-                                                            <span class="truncate">{{ $work['story_count'] }} {{ Str::plural('story', $work['story_count']) }}</span>
                                                         @endif
                                                     </button>
                                                     <flux:popover class="w-80">
@@ -600,13 +632,6 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                                                 <div>
                                                                     <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Story Points</flux:text>
                                                                     <flux:text class="mt-1">{{ $work['story_points'] }} {{ Str::plural('point', $work['story_points']) }}</flux:text>
-                                                                </div>
-                                                                @endif
-
-                                                                @if($work['story_count'] > 0)
-                                                                <div>
-                                                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Stories</flux:text>
-                                                                    <flux:text class="mt-1">{{ $work['story_count'] }} {{ Str::plural('story', $work['story_count']) }}</flux:text>
                                                                 </div>
                                                                 @endif
 
