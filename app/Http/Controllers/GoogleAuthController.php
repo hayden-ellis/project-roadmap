@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Team;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Laravel\Socialite\Facades\Socialite;
 use Throwable;
@@ -37,18 +39,34 @@ class GoogleAuthController extends Controller
             // Log the user in if they already exist
             Auth::login($existingUser);
         } else {
-            // Otherwise, create a new user and log them in
-            $newUser = User::updateOrCreate([
-                'email' => $user->email,
-            ], [
-                'name' => $user->name,
-                'password' => bcrypt(Str::random(16)), // Set a random password
-                'email_verified_at' => now(),
-            ]);
+            // Otherwise, create a new user with a team and log them in
+            $newUser = DB::transaction(function () use ($user) {
+                return tap(User::create([
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'password' => bcrypt(Str::random(16)), // Set a random password
+                    'email_verified_at' => now(),
+                ]), function (User $newUser) {
+                    $this->createTeam($newUser);
+                });
+            });
+
             Auth::login($newUser);
         }
 
         // Redirect the user to the roadmap or dashboard
         return redirect()->route('roadmap');
+    }
+
+    /**
+     * Create a personal team for the user.
+     */
+    protected function createTeam(User $user): void
+    {
+        $user->ownedTeams()->save(Team::forceCreate([
+            'user_id' => $user->id,
+            'name' => explode(' ', $user->name, 2)[0]."'s Team",
+            'personal_team' => true,
+        ]));
     }
 }
