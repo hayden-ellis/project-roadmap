@@ -205,13 +205,13 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 </div>
 
                 <!-- Week Headers -->
-                <div class="flex border-b border-zinc-200 dark:border-zinc-700">
+                <div class="flex border-b border-zinc-200 dark:border-zinc-700 relative overflow-visible">
                     <div class="w-48 flex-shrink-0 p-3 font-semibold border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-white dark:bg-zinc-950 shadow-[2px_0_4px_rgba(0,0,0,0.05)]">
                         Epic
                     </div>
-                    <div class="flex-1 flex">
+                    <div class="flex-1 flex relative overflow-visible">
                         @foreach($weeks as $weekIndex => $week)
-                            <div class="flex-1 min-w-32 border-r border-zinc-200 dark:border-zinc-700">
+                            <div class="flex-1 min-w-32 border-r border-zinc-200 dark:border-zinc-700 relative overflow-visible">
                                 <div class="p-2 text-center text-sm font-medium text-zinc-600 dark:text-zinc-400">
                                     Week {{ $weekIndex + 1 }}
                                 </div>
@@ -223,6 +223,23 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                         </div>
                                     @endforeach
                                 </div>
+                                @php
+                                    $today = \Carbon\Carbon::today();
+                                    $weekStart = $week[0];
+                                    $weekEnd = end($week);
+                                    $isTodayInWeek = $today >= $weekStart && $today <= $weekEnd;
+                                @endphp
+                                @if($isTodayInWeek)
+                                    @php
+                                        $daysFromStart = $weekStart->diffInDays($today);
+                                        $todayPercent = (($daysFromStart / 7) * 100) + (100 / 7 / 2); // Center of the day
+                                    @endphp
+                                    <div class="absolute top-0 bottom-0 w-px bg-cyan-500/60 z-0 pointer-events-none overflow-visible" style="left: {{ $todayPercent }}%">
+                                        <div class="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-bold text-cyan-600 dark:text-cyan-400 whitespace-nowrap bg-white dark:bg-zinc-950 px-1 rounded z-40">
+                                            TODAY
+                                        </div>
+                                    </div>
+                                @endif
                             </div>
                         @endforeach
                     </div>
@@ -315,8 +332,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                     @foreach($weeks as $weekIndex => $week)
                                         <div class="flex-1 min-w-32 border-r border-zinc-200 dark:border-zinc-700 relative overflow-visible">
                                             @php
+                                                $today = \Carbon\Carbon::today();
                                                 $weekStart = $week[0];
                                                 $weekEnd = end($week);
+                                                $isTodayInWeek = $today >= $weekStart && $today <= $weekEnd;
                                                 $squadStart = $work['start_date'];
                                                 $squadEnd = $work['end_date'];
                                                 
@@ -354,6 +373,14 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                                     $isLastWeek = $squadEnd <= $weekEnd;
                                                 }
                                             @endphp
+                                            
+                                            @if($isTodayInWeek)
+                                                @php
+                                                    $daysFromStart = $weekStart->diffInDays($today);
+                                                    $todayPercent = (($daysFromStart / 7) * 100) + (100 / 7 / 2);
+                                                @endphp
+                                                <div class="absolute top-0 bottom-0 w-px bg-cyan-500/60 z-0 pointer-events-none" style="left: {{ $todayPercent }}%"></div>
+                                            @endif
                                             
                                             @if($overlaps)
                                                 <flux:dropdown position="top" align="start">
@@ -441,15 +468,33 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             @else
                 {{-- Monthly View --}}
                 <!-- Month Headers -->
-                <div class="flex border-b-2 border-zinc-300 dark:border-zinc-600">
+                <div class="flex border-b-2 border-zinc-300 dark:border-zinc-600 relative overflow-visible">
                     <div class="w-48 flex-shrink-0 p-3 font-semibold border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-white dark:bg-zinc-950 shadow-[2px_0_4px_rgba(0,0,0,0.05)]">
                         Epic
                     </div>
-                    <div class="flex-1 flex">
-                        @foreach($months as $month)
-                            <div class="flex-1 min-w-40 border-r border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800">
-                                <div class="p-3 text-center font-bold text-base">
+                    <div class="flex-1 flex relative overflow-visible">
+                        @foreach($months as $monthIndex => $month)
+                            <div class="flex-1 min-w-40 border-r border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative overflow-visible">
+                                <div class="p-3 text-center font-bold text-base relative">
                                     {{ $month['date']->format('M Y') }}
+                                    @php
+                                        $today = \Carbon\Carbon::today();
+                                        $monthStart = $month['start'];
+                                        $monthEnd = $month['end'];
+                                        $isTodayInMonth = $today >= $monthStart && $today <= $monthEnd;
+                                    @endphp
+                                    @if($isTodayInMonth)
+                                        @php
+                                            $daysInMonth = $monthStart->daysInMonth;
+                                            $daysFromStart = $monthStart->diffInDays($today);
+                                            $todayPercent = (($daysFromStart / $daysInMonth) * 100) + (100 / $daysInMonth / 2);
+                                        @endphp
+                                        <div class="absolute bottom-0 h-2 w-px bg-cyan-500/60 z-0 pointer-events-none overflow-visible" style="left: {{ $todayPercent }}%; transform: translateX(-50%);">
+                                            <div class="absolute -top-1 left-1/2 -translate-x-1/2 text-[10px] font-bold text-cyan-600 dark:text-cyan-400 whitespace-nowrap bg-white dark:bg-zinc-950 px-1 rounded z-40">
+                                                TODAY
+                                            </div>
+                                        </div>
+                                    @endif
                                 </div>
                             </div>
                         @endforeach
@@ -582,7 +627,20 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                                     // Check if this is the last month
                                                     $isLastMonth = $squadEnd <= $monthEnd;
                                                 }
+                                                
+                                                // Check if today is in this month
+                                                $today = \Carbon\Carbon::today();
+                                                $isTodayInMonth = $today >= $monthStart && $today <= $monthEnd;
                                             @endphp
+                                            
+                                            @if($isTodayInMonth)
+                                                @php
+                                                    $daysInMonth = $monthStart->daysInMonth;
+                                                    $daysFromStart = $monthStart->diffInDays($today);
+                                                    $todayPercent = (($daysFromStart / $daysInMonth) * 100) + (100 / $daysInMonth / 2);
+                                                @endphp
+                                                <div class="absolute top-0 bottom-0 w-px bg-cyan-500/60 z-0 pointer-events-none" style="left: {{ $todayPercent }}%"></div>
+                                            @endif
                                             
                                             @if($overlaps)
                                                 <flux:dropdown position="top" align="start">
