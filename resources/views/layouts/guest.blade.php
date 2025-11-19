@@ -15,13 +15,13 @@
         @vite(['resources/css/app.css', 'resources/js/app.js'])
 
         <!-- Styles -->
-        @livewireStyles
+        @fluxAppearance
     </head>
     <body>
         <div class="font-sans text-zinc-900 antialiased">
             {{ $slot }}
         </div>
 
-        @livewireScripts
+        @fluxScripts
     </body>
 </html>

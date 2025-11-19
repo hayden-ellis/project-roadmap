@@ -27,7 +27,6 @@
 
                 <!-- Email Address -->
                 <flux:input
-                    wire:model="email"
                     label="{{ __('Email address') }}"
                     type="email"
                     id="email"
@@ -42,7 +41,6 @@
                 <!-- Password -->
                 <div class="relative">
                     <flux:input
-                        wire:model="password"
                         label="{{ __('Password') }}"
                         type="password"
                         id="password"
@@ -61,7 +59,6 @@
 
                 <!-- Remember Me -->
                 <flux:checkbox id="remember_me" name="remember" label="{{ __('Remember me') }}" />
-
                 <div class="flex items-center justify-end">
                     <flux:button variant="primary" type="submit" class="w-full">{{ __('Log in') }}</flux:button>
                 </div>
