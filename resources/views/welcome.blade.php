@@ -27,7 +27,7 @@
                             @auth
                                 <a
                                     href="{{ url('/roadmap') }}"
-                                    class="inline-flex items-center px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors font-medium text-sm"
+                                    class="inline-flex items-center px-4 py-2 bg-cyan-500 dark:bg-cyan-400 text-white dark:text-white rounded-lg hover:bg-cyan-600 dark:hover:bg-cyan-300 transition-colors font-medium text-sm"
                                 >
                                     Go to Roadmap
                                 </a>
@@ -68,7 +68,7 @@
                         @auth
                             <a
                                 href="{{ url('/roadmap') }}"
-                                class="inline-flex items-center px-6 py-3 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors font-semibold text-base shadow-lg"
+                                class="inline-flex items-center px-6 py-3 bg-cyan-500 dark:bg-cyan-400 text-white dark:text-white rounded-lg hover:bg-cyan-600 dark:hover:bg-cyan-300 transition-colors font-semibold text-base shadow-lg"
                             >
                                 View Your Roadmap
                             </a>
