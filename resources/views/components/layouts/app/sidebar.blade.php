@@ -95,7 +95,7 @@
         </flux:dropdown>
     </flux:header>
 
-    <flux:main>
+    <flux:main class="">
         {{ $slot }}
     </flux:main>
 

@@ -97,7 +97,21 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 };
 ?>
 
-<div>
+<div class="-m-3 lg:-m-8 p-1 lg:p-8" x-data="{ 
+    sidebarCollapsed: false,
+    init() {
+        const sidebar = document.querySelector('[data-flux-sidebar]');
+        this.sidebarCollapsed = sidebar?.hasAttribute('data-flux-sidebar-collapsed-desktop') ?? false;
+        
+        const observer = new MutationObserver(() => {
+            this.sidebarCollapsed = sidebar?.hasAttribute('data-flux-sidebar-collapsed-desktop') ?? false;
+        });
+        
+        if (sidebar) {
+            observer.observe(sidebar, { attributes: true, attributeFilter: ['data-flux-sidebar-collapsed-desktop'] });
+        }
+    }
+}">
     <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 md:gap-0 mb-6">
         <div class="flex flex-col md:flex-row items-start md:items-center gap-4">
             <flux:heading size="xl">Roadmap Calendar</flux:heading>
@@ -156,7 +170,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             @if($view_mode === 'weeks')
                 <!-- Month Headers -->
                 <div class="flex border-b-2 border-zinc-300 dark:border-zinc-600">
-                    <div class="w-48 flex-shrink-0 border-r border-zinc-200 dark:border-zinc-700"></div>
+                    <div class="flex-shrink-0 border-r border-zinc-200 dark:border-zinc-700" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'"></div>
                     <div class="flex-1 flex">
                         @php
                             $monthData = [];
@@ -206,7 +220,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
                 <!-- Week Headers -->
                 <div class="flex border-b border-zinc-200 dark:border-zinc-700 relative overflow-visible">
-                    <div class="w-48 flex-shrink-0 p-3 font-semibold border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-white dark:bg-zinc-950 shadow-[2px_0_4px_rgba(0,0,0,0.05)]">
+                    <div class="flex-shrink-0 p-3 font-semibold border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-white dark:bg-zinc-950 shadow-[2px_0_4px_rgba(0,0,0,0.05)]" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'">
                         Epic
                     </div>
                     <div class="flex-1 flex relative overflow-visible">
@@ -285,10 +299,13 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
                     <!-- Compact Epic Header Row -->
                     <div class="flex border-b-2 border-zinc-300 dark:border-zinc-600 bg-zinc-50 dark:bg-zinc-900">
-                        <div class="w-48 flex-shrink-0 py-1.5 px-3 border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-zinc-50 dark:bg-zinc-900 shadow-[2px_0_4px_rgba(0,0,0,0.05)]">
+                        <div class="flex-shrink-0 py-1.5 px-3 border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-zinc-50 dark:bg-zinc-900 shadow-[2px_0_4px_rgba(0,0,0,0.05)]" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'">
                             <flux:tooltip :content="$epic->title" class="w-full">
                                 <a href="/epics/{{ $epic->id }}/edit" wire:navigate class="block hover:text-blue-600 dark:hover:text-blue-400">
-                                    <div class="text-sm font-bold truncate text-zinc-900 dark:text-zinc-100">{{ $epic->title }} <span class="text-[10px] font-normal text-zinc-500 dark:text-zinc-400">({{ count($squadWork) }} {{ Str::plural('squad', count($squadWork)) }})</span></div>
+                                    @php
+                                        $totalPoints = collect($squadWork)->sum('story_points');
+                                    @endphp
+                                    <div class="text-sm font-bold truncate text-zinc-900 dark:text-zinc-100">{{ $epic->title }} @if($totalPoints)<span class="text-[10px] font-normal text-zinc-500 dark:text-zinc-400">({{ $totalPoints }} {{ Str::plural('pt', $totalPoints) }})</span>@endif</div>
                                 </a>
                             </flux:tooltip>
                         </div>
@@ -300,7 +317,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     <!-- Squad Rows -->
                     @foreach($squadWork as $work)
                         <div class="flex border-b border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
-                    <div class="w-48 flex-shrink-0 p-1.5 border-r border-zinc-200 dark:border-zinc-700 pl-8 sticky left-0 z-10 bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 shadow-[2px_0_4px_rgba(0,0,0,0.05)]">
+                    <div class="flex-shrink-0 p-1.5 border-r border-zinc-200 dark:border-zinc-700 pl-8 sticky left-0 z-10 bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 shadow-[2px_0_4px_rgba(0,0,0,0.05)]" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'">
                         <div class="flex items-center gap-2">
                             <div class="h-2 w-2 rounded-full flex-shrink-0" style="background-color: {{ $work['squad']->color }}"></div>
                             <span class="text-xs text-zinc-600 dark:text-zinc-400">{{ $work['squad']->name }}</span>
@@ -469,7 +486,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 {{-- Monthly View --}}
                 <!-- Month Headers -->
                 <div class="flex border-b-2 border-zinc-300 dark:border-zinc-600 relative overflow-visible">
-                    <div class="w-48 flex-shrink-0 p-3 font-semibold border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-white dark:bg-zinc-950 shadow-[2px_0_4px_rgba(0,0,0,0.05)]">
+                    <div class="flex-shrink-0 p-3 font-semibold border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-white dark:bg-zinc-950 shadow-[2px_0_4px_rgba(0,0,0,0.05)]" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'">
                         Epic
                     </div>
                     <div class="flex-1 flex relative overflow-visible">
@@ -541,10 +558,13 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
                     <!-- Compact Epic Header Row -->
                     <div class="flex border-b-2 border-zinc-300 dark:border-zinc-600 bg-zinc-50 dark:bg-zinc-900">
-                        <div class="w-48 flex-shrink-0 py-1.5 px-3 border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-zinc-50 dark:bg-zinc-900 shadow-[2px_0_4px_rgba(0,0,0,0.05)]">
+                        <div class="flex-shrink-0 py-1.5 px-3 border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-zinc-50 dark:bg-zinc-900 shadow-[2px_0_4px_rgba(0,0,0,0.05)]" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'">
                             <flux:tooltip :content="$epic->title" class="w-full">
                                 <a href="/epics/{{ $epic->id }}/edit" wire:navigate class="block hover:text-blue-600 dark:hover:text-blue-400">
-                                    <div class="text-sm font-bold truncate text-zinc-900 dark:text-zinc-100">{{ $epic->title }} <span class="text-[10px] font-normal text-zinc-500 dark:text-zinc-400">({{ count($squadWork) }} {{ Str::plural('squad', count($squadWork)) }})</span></div>
+                                    @php
+                                        $totalPoints = collect($squadWork)->sum('story_points');
+                                    @endphp
+                                    <div class="text-sm font-bold truncate text-zinc-900 dark:text-zinc-100">{{ $epic->title }} @if($totalPoints)<span class="text-[10px] font-normal text-zinc-500 dark:text-zinc-400">({{ $totalPoints }} {{ Str::plural('pt', $totalPoints) }})</span>@endif</div>
                                 </a>
                             </flux:tooltip>
                         </div>
@@ -556,7 +576,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     <!-- Squad Rows -->
                     @foreach($squadWork as $work)
                         <div class="flex border-b border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
-                            <div class="w-48 flex-shrink-0 p-1.5 border-r border-zinc-200 dark:border-zinc-800 pl-6 sticky left-0 z-10 bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 shadow-[2px_0_4px_rgba(0,0,0,0.05)]">
+                            <div class="flex-shrink-0 p-1.5 border-r border-zinc-200 dark:border-zinc-800 pl-6 sticky left-0 z-10 bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 shadow-[2px_0_4px_rgba(0,0,0,0.05)]" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'">
                                 <div class="flex items-center gap-2">
                                     <div class="h-2 w-2 rounded-full flex-shrink-0" style="background-color: {{ $work['squad']->color }}"></div>
                                     <span class="text-xs text-zinc-600 dark:text-zinc-400">{{ $work['squad']->name }}</span>
