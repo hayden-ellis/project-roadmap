@@ -41,8 +41,20 @@ class Epic extends Model
     public function squads(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
     {
         return $this->belongsToMany(Squad::class, 'epic_squad')
-            ->withPivot('start_date', 'end_date', 'story_points')
+            ->withPivot('start_date', 'end_date', 'story_points', 'planned_quarter')
             ->withTimestamps();
+    }
+
+    public function overlapsQuarter(string $quarter): bool
+    {
+        if (! $this->start_date || ! $this->end_date) {
+            return false;
+        }
+
+        $quarterDates = \App\Models\QuarterPlan::getQuarterDates($quarter);
+
+        return $this->start_date <= $quarterDates['end']
+            && $this->end_date >= $quarterDates['start'];
     }
 
     public function stories(): \Illuminate\Database\Eloquent\Relations\HasMany

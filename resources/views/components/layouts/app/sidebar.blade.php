@@ -21,6 +21,7 @@
             <flux:sidebar.item icon="calendar" href="/roadmap" wire:navigate>Roadmap</flux:sidebar.item>
             <flux:sidebar.item icon="folder" href="/epics" wire:navigate>Epics</flux:sidebar.item>
             <flux:sidebar.item icon="users" href="/squads" wire:navigate>Squads</flux:sidebar.item>
+            <flux:sidebar.item icon="calendar" href="/planning" wire:navigate>Planning</flux:sidebar.item>
         </flux:sidebar.nav>
 
         <flux:sidebar.spacer />

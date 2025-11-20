@@ -34,6 +34,10 @@ Route::middleware([
 
     Route::livewire('/epics/{epic}/stories/create', 'stories.create')->name('stories.create');
     Route::livewire('/stories/{story}/edit', 'stories.edit')->name('stories.edit');
+
+    Route::livewire('/planning', 'planning.index')->name('planning.index');
+    Route::livewire('/planning/create', 'planning.show')->name('planning.create');
+    Route::livewire('/planning/{plan}', 'planning.show')->name('planning.show');
 });
 
 Route::middleware(['auth:sanctum', 'verified'])->group(function () {
