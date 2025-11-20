@@ -39,7 +39,7 @@ new class extends Component
         RateLimiter::clear($this->throttleKey());
         Session::regenerate();
 
-        $this->redirectIntended(default: route('roster.index', absolute: false), navigate: true);
+        $this->redirectIntended(default: route('roadmap', absolute: false), navigate: true);
     }
 
     /**
@@ -116,7 +116,7 @@ new class extends Component
         <flux:checkbox wire:model="remember" label="{{ __('Remember me') }}" />
 
         <div class="flex items-center justify-end">
-            <flux:button variant="primary" type="submit" class="w-full">{{ __('Log in') }}</flux:button>
+            <flux:button variant="primary" type="submit" class="w-full data-loading:opacity-50 data-loading:pointer-events-none">{{ __('Log in') }}</flux:button>
         </div>
     </form>
 

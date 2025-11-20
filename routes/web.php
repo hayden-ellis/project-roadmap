@@ -19,7 +19,7 @@ Route::middleware([
     config('jetstream.auth_session'),
     'verified',
 ])->group(function () {
-    Route::livewire('/dashboard', 'dashboard')->name('dashboard');
+    /* Route::livewire('/dashboard', 'dashboard')->name('dashboard'); */
 
     Route::livewire('/roadmap', 'roadmap.calendar')->name('roadmap');
     Route::livewire('/roadmap/timeline', 'roadmap.timeline')->name('roadmap.timeline');

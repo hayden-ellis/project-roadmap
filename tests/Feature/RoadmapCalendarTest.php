@@ -49,3 +49,86 @@ it('can switch between timeline and calendar views', function () {
     $this->get('/roadmap/timeline')
         ->assertSuccessful();
 });
+
+it('can update squad work inline from calendar', function () {
+    $user = User::factory()->withPersonalTeam()->create();
+    $status = Status::first();
+    $squad = Squad::factory()->for($user->currentTeam)->create();
+
+    $epic = Epic::factory()
+        ->for($user->currentTeam)
+        ->for($status)
+        ->create([
+            'start_date' => now()->addDays(10),
+            'end_date' => now()->addDays(30),
+        ]);
+
+    $epic->squads()->attach($squad, [
+        'start_date' => now()->addDays(10),
+        'end_date' => now()->addDays(30),
+        'story_points' => 20,
+    ]);
+
+    $this->actingAs($user);
+
+    Livewire::test('roadmap.calendar')
+        ->call('updateSquadWork', $epic->id, $squad->id, now()->addDays(15)->format('Y-m-d'), now()->addDays(35)->format('Y-m-d'), 30);
+
+    expect($epic->squads()->first()->pivot)
+        ->start_date->toEqual(now()->addDays(15)->format('Y-m-d'))
+        ->end_date->toEqual(now()->addDays(35)->format('Y-m-d'))
+        ->story_points->toBe(30);
+});
+
+it('can clear squad work values with null', function () {
+    $user = User::factory()->withPersonalTeam()->create();
+    $status = Status::first();
+    $squad = Squad::factory()->for($user->currentTeam)->create();
+
+    $epic = Epic::factory()
+        ->for($user->currentTeam)
+        ->for($status)
+        ->create([
+            'start_date' => now()->addDays(10),
+            'end_date' => now()->addDays(30),
+        ]);
+
+    $epic->squads()->attach($squad, [
+        'start_date' => now()->addDays(10),
+        'end_date' => now()->addDays(30),
+        'story_points' => 20,
+    ]);
+
+    $this->actingAs($user);
+
+    Livewire::test('roadmap.calendar')
+        ->call('updateSquadWork', $epic->id, $squad->id, null, null, null);
+
+    expect($epic->squads()->first()->pivot)
+        ->start_date->toBeNull()
+        ->end_date->toBeNull()
+        ->story_points->toBeNull();
+});
+
+it('requires authorization to update squad work', function () {
+    $user = User::factory()->withPersonalTeam()->create();
+    $otherUser = User::factory()->withPersonalTeam()->create();
+    $status = Status::first();
+    $squad = Squad::factory()->for($otherUser->currentTeam)->create();
+
+    $epic = Epic::factory()
+        ->for($otherUser->currentTeam)
+        ->for($status)
+        ->create([
+            'start_date' => now()->addDays(10),
+            'end_date' => now()->addDays(30),
+        ]);
+
+    $epic->squads()->attach($squad);
+
+    $this->actingAs($user);
+
+    Livewire::test('roadmap.calendar')
+        ->call('updateSquadWork', $epic->id, $squad->id, now()->addDays(15)->format('Y-m-d'), now()->addDays(35)->format('Y-m-d'), 30)
+        ->assertForbidden();
+});

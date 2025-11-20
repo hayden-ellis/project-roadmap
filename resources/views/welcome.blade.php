@@ -4,7 +4,7 @@
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
 
-        <title>{{ config('app.name', 'Laravel') }}</title>
+        <title>Project Roadmap</title>
 
         <!-- Fonts -->
         <link rel="preconnect" href="https://fonts.bunny.net">
@@ -12,6 +12,7 @@
 
         <!-- Styles / Scripts -->
         @vite(['resources/css/app.css', 'resources/js/app.js'])
+        @fluxAppearance
     </head>
     <body class="min-h-screen bg-gradient-to-b from-zinc-50 to-zinc-100 dark:from-zinc-900 dark:to-zinc-950 text-zinc-900 dark:text-zinc-100">
         <!-- Header Navigation -->
@@ -27,7 +28,7 @@
                             @auth
                                 <a
                                     href="{{ url('/roadmap') }}"
-                                    class="inline-flex items-center px-4 py-2 bg-cyan-500 dark:bg-cyan-400 text-white dark:text-white rounded-lg hover:bg-cyan-600 dark:hover:bg-cyan-300 transition-colors font-medium text-sm"
+                                    class="inline-flex items-center px-4 py-2 bg-cyan-500 dark:bg-cyan-400 text-white dark:text-white rounded-lg hover:bg-cyan-600 dark:hover:bg-cyan-400 transition-colors font-medium text-sm"
                                 >
                                     Go to Roadmap
                                 </a>
@@ -42,7 +43,7 @@
                                 @if (Route::has('register'))
                                     <a
                                         href="{{ route('register') }}"
-                                        class="inline-flex items-center px-4 py-2 bg-cyan-500 dark:bg-cyan-400 text-white dark:text-white rounded-lg hover:bg-cyan-600 dark:hover:bg-cyan-300 transition-colors font-medium text-sm"
+                                        class="inline-flex items-center px-4 py-2 bg-cyan-500 dark:bg-cyan-400/80 text-white dark:text-white rounded-lg hover:bg-cyan-600 dark:hover:bg-cyan-400 transition-colors font-medium text-sm"
                                     >
                                         Get Started
                                     </a>
@@ -68,14 +69,14 @@
                         @auth
                             <a
                                 href="{{ url('/roadmap') }}"
-                                class="inline-flex items-center px-6 py-3 bg-cyan-500 dark:bg-cyan-400 text-white dark:text-white rounded-lg hover:bg-cyan-600 dark:hover:bg-cyan-300 transition-colors font-semibold text-base shadow-lg"
+                                class="inline-flex items-center px-6 py-3 bg-cyan-500 dark:bg-cyan-400 text-white dark:text-white rounded-lg hover:bg-cyan-600 dark:hover:bg-cyan-400 transition-colors font-semibold text-base shadow-lg"
                             >
                                 View Your Roadmap
                             </a>
                         @else
                             <a
                                 href="{{ route('register') }}"
-                                class="inline-flex items-center px-6 py-3 bg-cyan-500 dark:bg-cyan-400 text-white dark:text-white rounded-lg hover:bg-cyan-600 dark:hover:bg-cyan-300 transition-colors font-semibold text-base shadow-lg"
+                                class="inline-flex items-center px-6 py-3 bg-cyan-500 dark:bg-cyan-400/80 text-white dark:text-white rounded-lg hover:bg-cyan-600 dark:hover:bg-cyan-500 transition-colors font-semibold text-base shadow-lg"
                             >
                                 Get Started Free
                             </a>
@@ -150,5 +151,7 @@
                 </div>
             </div>
         </footer>
+
+        @fluxScripts
     </body>
 </html>

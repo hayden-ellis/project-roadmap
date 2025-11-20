@@ -2,7 +2,9 @@
 
 use Carbon\CarbonPeriod;
 use Flux\DateRange;
+use Livewire\Attributes\Async;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\Renderless;
 use Livewire\Component;
 
 new #[Layout('components.layouts.app.sidebar')] class extends Component
@@ -16,6 +18,20 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     public function mount(): void
     {
         $this->date_range = DateRange::thisQuarter();
+    }
+
+    #[Async]
+    #[Renderless]
+    public function updateSquadWork(int $epicId, int $squadId, ?string $startDate, ?string $endDate, ?int $storyPoints): void
+    {
+        $epic = \App\Models\Epic::findOrFail($epicId);
+        $this->authorize('update', $epic);
+
+        $epic->squads()->updateExistingPivot($squadId, [
+            'start_date' => $startDate ?: null,
+            'end_date' => $endDate ?: null,
+            'story_points' => $storyPoints ?: null,
+        ]);
     }
 
     public function with(): array
@@ -164,13 +180,13 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             </div>
         </flux:card>
     @else
-        <div class="overflow-x-auto">
+        <div x-cloak class="overflow-x-auto">
             <div class="min-w-max">
             
             @if($view_mode === 'weeks')
                 <!-- Month Headers -->
                 <div class="flex border-b-2 border-zinc-300 dark:border-zinc-600">
-                    <div class="flex-shrink-0 border-r border-zinc-200 dark:border-zinc-700" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'"></div>
+                    <div class="flex-shrink-0 border-r border-zinc-200 dark:border-zinc-700" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'" x-cloak></div>
                     <div class="flex-1 flex">
                         @php
                             $monthData = [];
@@ -220,7 +236,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
                 <!-- Week Headers -->
                 <div class="flex border-b border-zinc-200 dark:border-zinc-700 relative overflow-visible">
-                    <div class="flex-shrink-0 p-3 font-semibold border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-white dark:bg-zinc-950 shadow-[2px_0_4px_rgba(0,0,0,0.05)]" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'">
+                    <div class="flex-shrink-0 p-3 font-semibold border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-white dark:bg-zinc-950 shadow-[2px_0_4px_rgba(0,0,0,0.05)]" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'" x-cloak>
                         Epic
                     </div>
                     <div class="flex-1 flex relative overflow-visible">
@@ -299,7 +315,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
                     <!-- Compact Epic Header Row -->
                     <div class="flex border-b-2 border-zinc-300 dark:border-zinc-600 bg-zinc-50 dark:bg-zinc-900">
-                        <div class="flex-shrink-0 py-1.5 px-3 border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-zinc-50 dark:bg-zinc-900 shadow-[2px_0_4px_rgba(0,0,0,0.05)]" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'">
+                        <div class="flex-shrink-0 py-1.5 px-3 border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-zinc-50 dark:bg-zinc-900 shadow-[2px_0_4px_rgba(0,0,0,0.05)]" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'" x-cloak>
                             <flux:tooltip :content="$epic->title" class="w-full">
                                 <a href="/epics/{{ $epic->id }}/edit" wire:navigate class="block hover:text-blue-600 dark:hover:text-blue-400">
                                     @php
@@ -317,7 +333,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     <!-- Squad Rows -->
                     @foreach($squadWork as $work)
                         <div class="flex border-b border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
-                    <div class="flex-shrink-0 p-1.5 border-r border-zinc-200 dark:border-zinc-700 pl-8 sticky left-0 z-10 bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 shadow-[2px_0_4px_rgba(0,0,0,0.05)]" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'">
+                    <div class="flex-shrink-0 p-1.5 border-r border-zinc-200 dark:border-zinc-700 pl-8 sticky left-0 z-10 bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 shadow-[2px_0_4px_rgba(0,0,0,0.05)]" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'" x-cloak>
                         <div class="flex items-center gap-2">
                             <div class="h-2 w-2 rounded-full flex-shrink-0" style="background-color: {{ $work['squad']->color }}"></div>
                             <span class="text-xs text-zinc-600 dark:text-zinc-400">{{ $work['squad']->name }}</span>
@@ -414,64 +430,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                                             <span class="truncate">{{ $work['story_points'] }} pts</span>
                                                         @endif
                                                     </button>
-                                                    <flux:popover class="w-80">
-                                                        <div class="flex flex-col gap-4">
-                                                            <div>
-                                                                <flux:heading size="lg">{{ $epic->title }}</flux:heading>
-                                                                <flux:badge :color="$epic->status->slug === 'completed' ? 'green' : ($epic->status->slug === 'in-progress' ? 'blue' : ($epic->status->slug === 'blocked' ? 'red' : 'zinc'))" class="mt-2">
-                                                                    {{ $epic->status->name }}
-                                                                </flux:badge>
-                                                            </div>
-                                                            
-                                                            @if($epic->description)
-                                                            <flux:text class="text-sm">{{ $epic->description }}</flux:text>
-                                                            @endif
-
-                                                            <flux:separator variant="subtle" />
-                                                            
-                                                            <div class="space-y-3">
-                                                                <div>
-                                                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Squad</flux:text>
-                                                                    <div class="flex items-center gap-2 mt-1">
-                                                                        <div class="h-3 w-3 rounded-full" style="background-color: {{ $work['squad']->color }}"></div>
-                                                                        <flux:text>{{ $work['squad']->name }}</flux:text>
-                                                                    </div>
-                                                                </div>
-
-                                                                <div>
-                                                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Timeline</flux:text>
-                                                                    <flux:text class="mt-1">{{ $squadStart->format('M j, Y') }} - {{ $squadEnd->format('M j, Y') }}</flux:text>
-                                                                </div>
-
-                                                                @if($work['story_points'])
-                                                                <div>
-                                                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Story Points</flux:text>
-                                                                    <flux:text class="mt-1">{{ $work['story_points'] }} {{ Str::plural('point', $work['story_points']) }}</flux:text>
-                                                                </div>
-                                                                @endif
-
-                                                                @if($epic->squads->count() > 1)
-                                                                <div>
-                                                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">All Squads</flux:text>
-                                                                    <div class="flex flex-wrap gap-1.5 mt-1">
-                                                                        @foreach($epic->squads as $squad)
-                                                                        <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs" style="background-color: {{ $squad->color }}20; color: {{ $squad->color }}">
-                                                                            <div class="h-1.5 w-1.5 rounded-full" style="background-color: {{ $squad->color }}"></div>
-                                                                            {{ $squad->name }}
-                                                                        </span>
-                                                                        @endforeach
-                                                                    </div>
-                                                                </div>
-                                                                @endif
-                                                            </div>
-
-                                                            <flux:separator variant="subtle" />
-
-                                                            <flux:button href="/epics/{{ $epic->id }}/edit" wire:navigate variant="primary" size="sm" icon="pencil">
-                                                                Edit Epic
-                                                            </flux:button>
-                                                        </div>
-                                                    </flux:popover>
+                                                    <x-roadmap.epic-squad-popover :epic="$epic" :work="$work" :squadStart="$squadStart" :squadEnd="$squadEnd" />
                                                 </flux:dropdown>
                                             @endif
                                         </div>
@@ -486,7 +445,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 {{-- Monthly View --}}
                 <!-- Month Headers -->
                 <div class="flex border-b-2 border-zinc-300 dark:border-zinc-600 relative overflow-visible">
-                    <div class="flex-shrink-0 p-3 font-semibold border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-white dark:bg-zinc-950 shadow-[2px_0_4px_rgba(0,0,0,0.05)]" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'">
+                    <div class="flex-shrink-0 p-3 font-semibold border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-white dark:bg-zinc-950 shadow-[2px_0_4px_rgba(0,0,0,0.05)]" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'" x-cloak>
                         Epic
                     </div>
                     <div class="flex-1 flex relative overflow-visible">
@@ -558,7 +517,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
                     <!-- Compact Epic Header Row -->
                     <div class="flex border-b-2 border-zinc-300 dark:border-zinc-600 bg-zinc-50 dark:bg-zinc-900">
-                        <div class="flex-shrink-0 py-1.5 px-3 border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-zinc-50 dark:bg-zinc-900 shadow-[2px_0_4px_rgba(0,0,0,0.05)]" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'">
+                        <div class="flex-shrink-0 py-1.5 px-3 border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-zinc-50 dark:bg-zinc-900 shadow-[2px_0_4px_rgba(0,0,0,0.05)]" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'" x-cloak>
                             <flux:tooltip :content="$epic->title" class="w-full">
                                 <a href="/epics/{{ $epic->id }}/edit" wire:navigate class="block hover:text-blue-600 dark:hover:text-blue-400">
                                     @php
@@ -575,8 +534,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
                     <!-- Squad Rows -->
                     @foreach($squadWork as $work)
-                        <div class="flex border-b border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
-                            <div class="flex-shrink-0 p-1.5 border-r border-zinc-200 dark:border-zinc-800 pl-6 sticky left-0 z-10 bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 shadow-[2px_0_4px_rgba(0,0,0,0.05)]" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'">
+                        <div class="flex border-b border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
+                            <div class="flex-shrink-0 p-1.5 border-r border-zinc-200 dark:border-zinc-800 pl-6 sticky left-0 z-10 bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-800 shadow-[2px_0_4px_rgba(0,0,0,0.05)]" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'" x-cloak>
                                 <div class="flex items-center gap-2">
                                     <div class="h-2 w-2 rounded-full flex-shrink-0" style="background-color: {{ $work['squad']->color }}"></div>
                                     <span class="text-xs text-zinc-600 dark:text-zinc-400">{{ $work['squad']->name }}</span>
@@ -606,7 +565,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                         $firstVisibleMonth = null;
                                     @endphp
                                     @foreach($months as $monthIndex => $month)
-                                        <div class="flex-1 min-w-40 border-r border-zinc-200 dark:border-zinc-800 relative">
+                                        <div class="flex-1 min-w-40 border-r border-zinc-200 dark:border-zinc-700 relative">
                                             @php
                                                 $monthStart = $month['start'];
                                                 $monthEnd = $month['end'];
@@ -677,64 +636,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                                             <span class="truncate">{{ $work['story_points'] }} pts</span>
                                                         @endif
                                                     </button>
-                                                    <flux:popover class="w-80">
-                                                        <div class="flex flex-col gap-4">
-                                                            <div>
-                                                                <flux:heading size="lg">{{ $epic->title }}</flux:heading>
-                                                                <flux:badge :color="$epic->status->slug === 'completed' ? 'green' : ($epic->status->slug === 'in-progress' ? 'blue' : ($epic->status->slug === 'blocked' ? 'red' : 'zinc'))" class="mt-2">
-                                                                    {{ $epic->status->name }}
-                                                                </flux:badge>
-                                                            </div>
-                                                            
-                                                            @if($epic->description)
-                                                            <flux:text class="text-sm">{{ $epic->description }}</flux:text>
-                                                            @endif
-
-                                                            <flux:separator variant="subtle" />
-                                                            
-                                                            <div class="space-y-3">
-                                                                <div>
-                                                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Squad</flux:text>
-                                                                    <div class="flex items-center gap-2 mt-1">
-                                                                        <div class="h-3 w-3 rounded-full" style="background-color: {{ $work['squad']->color }}"></div>
-                                                                        <flux:text>{{ $work['squad']->name }}</flux:text>
-                                                                    </div>
-                                                                </div>
-
-                                                                <div>
-                                                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Timeline</flux:text>
-                                                                    <flux:text class="mt-1">{{ $squadStart->format('M j, Y') }} - {{ $squadEnd->format('M j, Y') }}</flux:text>
-                                                                </div>
-
-                                                                @if($work['story_points'])
-                                                                <div>
-                                                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Story Points</flux:text>
-                                                                    <flux:text class="mt-1">{{ $work['story_points'] }} {{ Str::plural('point', $work['story_points']) }}</flux:text>
-                                                                </div>
-                                                                @endif
-
-                                                                @if($epic->squads->count() > 1)
-                                                                <div>
-                                                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">All Squads</flux:text>
-                                                                    <div class="flex flex-wrap gap-1.5 mt-1">
-                                                                        @foreach($epic->squads as $squad)
-                                                                        <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs" style="background-color: {{ $squad->color }}20; color: {{ $squad->color }}">
-                                                                            <div class="h-1.5 w-1.5 rounded-full" style="background-color: {{ $squad->color }}"></div>
-                                                                            {{ $squad->name }}
-                                                                        </span>
-                                                                        @endforeach
-                                                                    </div>
-                                                                </div>
-                                                                @endif
-                                                            </div>
-
-                                                            <flux:separator variant="subtle" />
-
-                                                            <flux:button href="/epics/{{ $epic->id }}/edit" wire:navigate variant="primary" size="sm" icon="pencil">
-                                                                Edit Epic
-                                                            </flux:button>
-                                                        </div>
-                                                    </flux:popover>
+                                                    <x-roadmap.epic-squad-popover :epic="$epic" :work="$work" :squadStart="$squadStart" :squadEnd="$squadEnd" />
                                                 </flux:dropdown>
                                             @endif
                                         </div>
