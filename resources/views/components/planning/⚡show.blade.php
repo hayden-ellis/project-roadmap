@@ -30,7 +30,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         } else {
             // Create new plan - default to next quarter
             $now = Carbon::now();
-            $currentQuarter = ceil($now->month / 3);
+            $currentQuarter = (int) ceil($now->month / 3);
             $currentYear = $now->year;
 
             if ($currentQuarter === 4) {
@@ -52,7 +52,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $quarters = [];
         $now = Carbon::now();
         $currentYear = $now->year;
-        $currentQuarter = ceil($now->month / 3);
+        $currentQuarter = (int) ceil($now->month / 3);
 
         // Calculate next quarter to start from
         $nextQuarter = $currentQuarter === 4 ? 1 : $currentQuarter + 1;
@@ -75,7 +75,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         if ($this->selectedSquadId) {
             $this->editingCapacityValue = $this->getSelectedSquadCapacity();
         }
-        
+
         // Autosave: Create or update plan when quarter changes
         $this->savePlan();
     }
@@ -84,7 +84,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     {
         // Load capacity for the selected squad
         $this->editingCapacityValue = $this->getSelectedSquadCapacity();
-        
+
         // Autosave: Create or update plan when squad changes
         $this->savePlan();
     }
@@ -190,9 +190,12 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $selectedQuarter = $this->selectedQuarter;
         $quarterDates = QuarterPlan::getQuarterDates($selectedQuarter);
 
-        // Get epics that overlap the quarter but aren't planned for this squad/quarter
+        // Get epics that are assigned to this squad, overlap the quarter, but aren't planned for this squad/quarter
         return $team->epics()
             ->with(['status', 'squads'])
+            ->whereHas('squads', function ($q) {
+                $q->where('squads.id', $this->selectedSquadId);
+            })
             ->whereDoesntHave('squads', function ($q) use ($selectedQuarter) {
                 $q->where('squads.id', $this->selectedSquadId)
                     ->where('epic_squad.planned_quarter', $selectedQuarter);
@@ -298,9 +301,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $epic = Epic::findOrFail($epicId);
         $this->authorizeEpic($epic);
 
+        // Only remove the quarter assignment, preserve the story points
         $epic->squads()->updateExistingPivot($this->selectedSquadId, [
             'planned_quarter' => null,
-            'story_points' => null,
+            // Don't set story_points to null - preserve the sizing
         ]);
     }
 
@@ -334,33 +338,38 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 ?>
 
 <div>
-    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 py-6">
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pt-8 pb-10">
         <div>
-            <flux:button href="/planning" variant="ghost" icon="arrow-left" wire:navigate class="mb-2">Back to Plans</flux:button>
-            <flux:heading size="xl">{{ $quarterPlan ? 'Edit Plan' : 'Create Plan' }}</flux:heading>
+            <flux:button href="/planning" variant="ghost" icon="arrow-left" wire:navigate class="mb-3">Back to Plans</flux:button>
+            <h1>{{ $quarterPlan ? 'Edit Plan' : 'Create Plan' }}</h1>
+            <flux:text class="text-zinc-600 dark:text-zinc-400 mt-2">Configure capacity and allocate epics for your squad</flux:text>
         </div>
     </div>
 
     <!-- Steps 1 & 2: Quarter and Squad Selectors -->
-    <div class="mb-6 flex flex-col sm:flex-row gap-4">
-        <flux:field class="flex-1">
-            <flux:label>1. Select Quarter</flux:label>
-            <flux:select variant="listbox" wire:model.live.debounce.500ms="selectedQuarter" placeholder="Select quarter..." >
-                @foreach($availableQuarters as $quarter)
-                <flux:select.option value="{{ $quarter }}">{{ $quarter }}</flux:select.option>
-                @endforeach
-            </flux:select>
-        </flux:field>
+    <div class="mb-6 flex flex-col sm:flex-row gap-8">
+        <div class="w-36">
+            <flux:field class="flex-1">
+                <flux:label>Select Quarter</flux:label>
+                <flux:select variant="listbox" wire:model.live.debounce.500ms="selectedQuarter" placeholder="Select quarter..." >
+                    @foreach($availableQuarters as $quarter)
+                    <flux:select.option value="{{ $quarter }}">{{ $quarter }}</flux:select.option>
+                    @endforeach
+                </flux:select>
+            </flux:field>
+        </div>
 
         @if($selectedQuarter)
-        <flux:field class="flex-1">
-            <flux:label>2. Select Squad</flux:label>
-            <flux:select variant="listbox" wire:model.live.debounce.500ms="selectedSquadId" placeholder="Select a squad...">
-                @foreach($squads as $squad)
-                <flux:select.option value="{{ $squad->id }}">{{ $squad->name }}</flux:select.option>
-                @endforeach
-            </flux:select>
-        </flux:field>
+        <div class="w-36">
+            <flux:field class="flex-1">
+                <flux:label>Select Squad</flux:label>
+                <flux:select variant="listbox" wire:model.live.debounce.500ms="selectedSquadId" placeholder="Select a squad...">
+                    @foreach($squads as $squad)
+                    <flux:select.option value="{{ $squad->id }}">{{ $squad->name }}</flux:select.option>
+                    @endforeach
+                </flux:select>
+            </flux:field>
+        </div>
         @endif
     </div>
 
@@ -427,14 +436,14 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         </div>
     </flux:card>
 
-    <!-- Step 4: Epic Planning -->
+    <!-- Epic Planning -->
     <div class="mb-6">
-        <flux:heading size="lg" class="mb-4">4. Plan Epics</flux:heading>
+        <h2 class="mb-6">Plan Epics</h2>
 
         <!-- Planned Epics (Above the Line) -->
-        <div class="mb-6">
-            <div class="flex items-center gap-3 mb-4">
-                <flux:heading size="base" class="text-green-600 dark:text-green-400">In Plan</flux:heading>
+        <div class="mb-8">
+            <div class="flex items-center gap-3 mb-5">
+                <h3 class="text-green-600 dark:text-green-400">In Plan</h3>
                 <div class="flex-1 h-px bg-green-200 dark:bg-green-900"></div>
                 <flux:badge color="green" size="sm">{{ $plannedEpics->count() }} epic{{ $plannedEpics->count() !== 1 ? 's' : '' }}</flux:badge>
             </div>
@@ -489,8 +498,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
         <!-- Available Epics (Below the Line) -->
         <div>
-            <div class="flex items-center gap-3 mb-4">
-                <flux:heading size="base" class="text-zinc-600 dark:text-zinc-400">Available Epics</flux:heading>
+            <div class="flex items-center gap-3 mb-5">
+                <h3 class="text-zinc-600 dark:text-zinc-400">Available Epics</h3>
                 <div class="flex-1 h-px bg-zinc-200 dark:bg-zinc-800"></div>
                 <flux:badge color="zinc" size="sm">{{ $availableEpics->count() }} epic{{ $availableEpics->count() !== 1 ? 's' : '' }}</flux:badge>
             </div>

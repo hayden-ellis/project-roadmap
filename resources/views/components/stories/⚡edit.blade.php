@@ -85,13 +85,13 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
 <div>
     <flux:main>
-        <form wire:submit="save" class="mx-auto max-w-2xl px-4 sm:px-6 lg:px-8 py-6">
-            <div class="mb-6">
-                <flux:button href="/epics/{{ $epic->id }}/edit" variant="ghost" icon="arrow-left" wire:navigate>Back to Epic</flux:button>
+        <form wire:submit="save" class="mx-auto max-w-2xl px-4 sm:px-6 lg:px-8 pt-8 pb-6">
+            <div class="pb-4">
+                <flux:button href="/epics/{{ $epic->id }}/edit" variant="ghost" icon="arrow-left" wire:navigate class="mb-3">Back to Epic</flux:button>
             </div>
 
-            <flux:heading size="xl" class="mb-2">Edit Story</flux:heading>
-            <flux:text class="mb-6">For epic: {{ $epic->title }}</flux:text>
+            <h1 class="mb-2">Edit Story</h1>
+            <flux:text class="mb-6 text-zinc-600 dark:text-zinc-400">For epic: {{ $epic->title }}</flux:text>
 
             <flux:card class="space-y-6">
                 <flux:field>

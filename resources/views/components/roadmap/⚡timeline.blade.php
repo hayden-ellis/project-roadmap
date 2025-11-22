@@ -52,9 +52,9 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 ?>
 
 <div>
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex items-center justify-between pt-8 pb-10">
         <div class="flex items-center gap-4">
-            <flux:heading size="xl">Roadmap Timeline</flux:heading>
+            <h1>Roadmap Timeline</h1>
             <x-roadmap-navigation currentView="timeline" />
         </div>
     </div>

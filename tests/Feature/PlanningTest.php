@@ -10,22 +10,23 @@ use Livewire\Livewire;
 
 beforeEach(function () {
     $this->seed(\Database\Seeders\StatusSeeder::class);
+
+    // Common setup for most tests
+    $this->user = User::factory()->withPersonalTeam()->create();
+    $this->team = $this->user->currentTeam;
+    $this->squad = Squad::factory()->for($this->team)->create();
+    $this->status = Status::first();
+
+    // Act as the user by default
+    $this->actingAs($this->user);
 });
 
 it('can view planning page', function () {
-    $user = User::factory()->withPersonalTeam()->create();
-
-    $this->actingAs($user)
-        ->get('/planning')
-        ->assertSuccessful();
+    $this->get('/planning')->assertSuccessful();
 });
 
 it('defaults to next quarter', function () {
-    $user = User::factory()->withPersonalTeam()->create();
-
-    $this->actingAs($user);
-
-    $component = Livewire::test('planning.show');
+    $component = Livewire::test('planning.show', ['plan' => null]);
     $selectedQuarter = $component->get('selectedQuarter');
 
     // Verify it's a valid quarter format (Q1-Q4-YYYY)
@@ -37,19 +38,14 @@ it('defaults to next quarter', function () {
 });
 
 it('can set squad capacity for a quarter', function () {
-    $user = User::factory()->withPersonalTeam()->create();
-    $squad = Squad::factory()->for($user->currentTeam)->create();
-
-    $this->actingAs($user);
-
-    Livewire::test('planning.show')
+    Livewire::test('planning.show', ['plan' => null])
         ->set('selectedQuarter', 'Q1-2026')
-        ->set('selectedSquadId', $squad->id)
+        ->set('selectedSquadId', $this->squad->id)
         ->set('editingCapacityValue', 100);
 
     $this->assertDatabaseHas('quarter_plans', [
-        'team_id' => $user->currentTeam->id,
-        'squad_id' => $squad->id,
+        'team_id' => $this->team->id,
+        'squad_id' => $this->squad->id,
         'year' => 2026,
         'quarter' => 1,
         'available_story_points' => 100,
@@ -57,22 +53,18 @@ it('can set squad capacity for a quarter', function () {
 });
 
 it('can update existing squad capacity', function () {
-    $user = User::factory()->withPersonalTeam()->create();
-    $squad = Squad::factory()->for($user->currentTeam)->create();
     $quarterPlan = QuarterPlan::factory()
-        ->for($user->currentTeam)
-        ->for($squad)
+        ->for($this->team)
+        ->for($this->squad)
         ->create([
             'year' => 2026,
             'quarter' => 1,
             'available_story_points' => 50,
         ]);
 
-    $this->actingAs($user);
-
-    Livewire::test('planning.show')
+    Livewire::test('planning.show', ['plan' => null])
         ->set('selectedQuarter', 'Q1-2026')
-        ->set('selectedSquadId', $squad->id)
+        ->set('selectedSquadId', $this->squad->id)
         ->set('editingCapacityValue', 75);
 
     $quarterPlan->refresh();
@@ -80,93 +72,75 @@ it('can update existing squad capacity', function () {
 });
 
 it('can add epic to plan', function () {
-    $user = User::factory()->withPersonalTeam()->create();
-    $squad = Squad::factory()->for($user->currentTeam)->create();
-    $status = Status::first();
     $epic = Epic::factory()
-        ->for($user->currentTeam)
-        ->for($status)
+        ->for($this->team)
+        ->for($this->status)
         ->create();
 
-    $this->actingAs($user);
-
-    Livewire::test('planning.show')
+    Livewire::test('planning.show', ['plan' => null])
         ->set('selectedQuarter', 'Q1-2026')
-        ->set('selectedSquadId', $squad->id)
+        ->set('selectedSquadId', $this->squad->id)
         ->call('addEpicToPlan', $epic->id);
 
     $this->assertDatabaseHas('epic_squad', [
         'epic_id' => $epic->id,
-        'squad_id' => $squad->id,
+        'squad_id' => $this->squad->id,
         'planned_quarter' => 'Q1-2026',
         'story_points' => null,
     ]);
 });
 
 it('can update epic story points inline', function () {
-    $user = User::factory()->withPersonalTeam()->create();
-    $squad = Squad::factory()->for($user->currentTeam)->create();
-    $status = Status::first();
     $epic = Epic::factory()
-        ->for($user->currentTeam)
-        ->for($status)
+        ->for($this->team)
+        ->for($this->status)
         ->create();
-    $epic->squads()->attach($squad, [
+    $epic->squads()->attach($this->squad, [
         'planned_quarter' => 'Q1-2026',
         'story_points' => 20,
     ]);
 
-    $this->actingAs($user);
-
-    Livewire::test('planning.show')
+    Livewire::test('planning.show', ['plan' => null])
         ->set('selectedQuarter', 'Q1-2026')
-        ->set('selectedSquadId', $squad->id)
+        ->set('selectedSquadId', $this->squad->id)
         ->call('updateEpicStoryPoints', $epic->id, 30);
 
     $this->assertDatabaseHas('epic_squad', [
         'epic_id' => $epic->id,
-        'squad_id' => $squad->id,
+        'squad_id' => $this->squad->id,
         'planned_quarter' => 'Q1-2026',
         'story_points' => 30,
     ]);
 });
 
 it('can remove epic from plan', function () {
-    $user = User::factory()->withPersonalTeam()->create();
-    $squad = Squad::factory()->for($user->currentTeam)->create();
-    $status = Status::first();
     $epic = Epic::factory()
-        ->for($user->currentTeam)
-        ->for($status)
+        ->for($this->team)
+        ->for($this->status)
         ->create();
-    $epic->squads()->attach($squad, [
+    $epic->squads()->attach($this->squad, [
         'planned_quarter' => 'Q1-2026',
         'story_points' => 20,
     ]);
 
-    $this->actingAs($user);
-
-    Livewire::test('planning.show')
+    Livewire::test('planning.show', ['plan' => null])
         ->set('selectedQuarter', 'Q1-2026')
-        ->set('selectedSquadId', $squad->id)
+        ->set('selectedSquadId', $this->squad->id)
         ->call('removeEpicFromPlan', $epic->id);
 
+    // Story points should be preserved when removing from plan
     $this->assertDatabaseHas('epic_squad', [
         'epic_id' => $epic->id,
-        'squad_id' => $squad->id,
+        'squad_id' => $this->squad->id,
         'planned_quarter' => null,
-        'story_points' => null,
+        'story_points' => 20, // Points are preserved
     ]);
 });
 
 it('calculates total allocated points correctly', function () {
-    $user = User::factory()->withPersonalTeam()->create();
-    $squad = Squad::factory()->for($user->currentTeam)->create();
-    $status = Status::first();
-
     $quarterPlan = QuarterPlan::factory()
-        ->for($user->currentTeam)
-        ->for($squad)
+        ->for($this->team)
+        ->for($this->squad)
         ->create([
             'year' => 2026,
             'quarter' => 1,
@@ -174,28 +148,26 @@ it('calculates total allocated points correctly', function () {
         ]);
 
     $epic1 = Epic::factory()
-        ->for($user->currentTeam)
-        ->for($status)
+        ->for($this->team)
+        ->for($this->status)
         ->create();
-    $epic1->squads()->attach($squad, [
+    $epic1->squads()->attach($this->squad, [
         'planned_quarter' => 'Q1-2026',
         'story_points' => 30,
     ]);
 
     $epic2 = Epic::factory()
-        ->for($user->currentTeam)
-        ->for($status)
+        ->for($this->team)
+        ->for($this->status)
         ->create();
-    $epic2->squads()->attach($squad, [
+    $epic2->squads()->attach($this->squad, [
         'planned_quarter' => 'Q1-2026',
         'story_points' => 40,
     ]);
 
-    $this->actingAs($user);
-
-    $component = Livewire::test('planning.show')
+    $component = Livewire::test('planning.show', ['plan' => null])
         ->set('selectedQuarter', 'Q1-2026')
-        ->set('selectedSquadId', $squad->id);
+        ->set('selectedSquadId', $this->squad->id);
 
     $capacity = $component->viewData('capacity');
     $totalAllocated = $component->viewData('totalAllocated');
@@ -205,13 +177,9 @@ it('calculates total allocated points correctly', function () {
 });
 
 it('shows over-allocation when allocated exceeds capacity', function () {
-    $user = User::factory()->withPersonalTeam()->create();
-    $squad = Squad::factory()->for($user->currentTeam)->create();
-    $status = Status::first();
-
     $quarterPlan = QuarterPlan::factory()
-        ->for($user->currentTeam)
-        ->for($squad)
+        ->for($this->team)
+        ->for($this->squad)
         ->create([
             'year' => 2026,
             'quarter' => 1,
@@ -219,19 +187,17 @@ it('shows over-allocation when allocated exceeds capacity', function () {
         ]);
 
     $epic = Epic::factory()
-        ->for($user->currentTeam)
-        ->for($status)
+        ->for($this->team)
+        ->for($this->status)
         ->create();
-    $epic->squads()->attach($squad, [
+    $epic->squads()->attach($this->squad, [
         'planned_quarter' => 'Q1-2026',
         'story_points' => 75,
     ]);
 
-    $this->actingAs($user);
-
-    $component = Livewire::test('planning.show')
+    $component = Livewire::test('planning.show', ['plan' => null])
         ->set('selectedQuarter', 'Q1-2026')
-        ->set('selectedSquadId', $squad->id);
+        ->set('selectedSquadId', $this->squad->id);
 
     $capacity = $component->viewData('capacity');
     $totalAllocated = $component->viewData('totalAllocated');
@@ -242,13 +208,9 @@ it('shows over-allocation when allocated exceeds capacity', function () {
 });
 
 it('only counts epics planned for selected quarter', function () {
-    $user = User::factory()->withPersonalTeam()->create();
-    $squad = Squad::factory()->for($user->currentTeam)->create();
-    $status = Status::first();
-
     $quarterPlan = QuarterPlan::factory()
-        ->for($user->currentTeam)
-        ->for($squad)
+        ->for($this->team)
+        ->for($this->squad)
         ->create([
             'year' => 2026,
             'quarter' => 1,
@@ -257,63 +219,56 @@ it('only counts epics planned for selected quarter', function () {
 
     // Epic planned for Q1-2026
     $epic1 = Epic::factory()
-        ->for($user->currentTeam)
-        ->for($status)
+        ->for($this->team)
+        ->for($this->status)
         ->create();
-    $epic1->squads()->attach($squad, [
+    $epic1->squads()->attach($this->squad, [
         'planned_quarter' => 'Q1-2026',
         'story_points' => 30,
     ]);
 
     // Epic planned for Q2-2026 (should not count)
     $epic2 = Epic::factory()
-        ->for($user->currentTeam)
-        ->for($status)
+        ->for($this->team)
+        ->for($this->status)
         ->create();
-    $epic2->squads()->attach($squad, [
+    $epic2->squads()->attach($this->squad, [
         'planned_quarter' => 'Q2-2026',
         'story_points' => 50,
     ]);
 
-    $this->actingAs($user);
-
-    $component = Livewire::test('planning.show')
+    $component = Livewire::test('planning.show', ['plan' => null])
         ->set('selectedQuarter', 'Q1-2026')
-        ->set('selectedSquadId', $squad->id);
+        ->set('selectedSquadId', $this->squad->id);
 
     $totalAllocated = $component->viewData('totalAllocated');
     expect($totalAllocated)->toBe(30);
 });
 
 it('shows relevant epics for selected squad and quarter', function () {
-    $user = User::factory()->withPersonalTeam()->create();
-    $squad = Squad::factory()->for($user->currentTeam)->create();
-    $status = Status::first();
-
-    // Epic that overlaps Q1-2026 but isn't planned for it
+    // Epic that overlaps Q1-2026, is assigned to squad, but isn't planned for it
     $overlappingEpic = Epic::factory()
-        ->for($user->currentTeam)
-        ->for($status)
+        ->for($this->team)
+        ->for($this->status)
         ->create([
             'start_date' => '2025-12-01',
             'end_date' => '2026-02-15',
         ]);
+    $overlappingEpic->squads()->attach($this->squad); // Assigned to squad but not planned
 
     // Epic planned for Q1-2026
     $plannedEpic = Epic::factory()
-        ->for($user->currentTeam)
-        ->for($status)
+        ->for($this->team)
+        ->for($this->status)
         ->create();
-    $plannedEpic->squads()->attach($squad, [
+    $plannedEpic->squads()->attach($this->squad, [
         'planned_quarter' => 'Q1-2026',
         'story_points' => 25,
     ]);
 
-    $this->actingAs($user);
-
-    $component = Livewire::test('planning.show')
+    $component = Livewire::test('planning.show', ['plan' => null])
         ->set('selectedQuarter', 'Q1-2026')
-        ->set('selectedSquadId', $squad->id);
+        ->set('selectedSquadId', $this->squad->id);
 
     $plannedEpics = $component->viewData('plannedEpics');
     $availableEpics = $component->viewData('availableEpics');
@@ -326,21 +281,65 @@ it('shows relevant epics for selected squad and quarter', function () {
         ->and($availableEpics->pluck('id')->toArray())->toContain($overlappingEpic->id);
 });
 
+it('only shows epics assigned to the selected squad', function () {
+    $squad1 = Squad::factory()->for($this->team)->create(['name' => 'Squad 1']);
+    $squad2 = Squad::factory()->for($this->team)->create(['name' => 'Squad 2']);
+
+    // Epic assigned to squad1 only (with dates overlapping Q1-2026)
+    $squad1Epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create([
+            'title' => 'Squad 1 Epic',
+            'start_date' => '2026-01-01',
+            'end_date' => '2026-03-31',
+        ]);
+    $squad1Epic->squads()->attach($squad1);
+
+    // Epic assigned to squad2 only (with dates overlapping Q1-2026)
+    $squad2Epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create([
+            'title' => 'Squad 2 Epic',
+            'start_date' => '2026-01-01',
+            'end_date' => '2026-03-31',
+        ]);
+    $squad2Epic->squads()->attach($squad2);
+
+    // Epic not assigned to any squad (with dates overlapping Q1-2026)
+    $unassignedEpic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create([
+            'title' => 'Unassigned Epic',
+            'start_date' => '2026-01-01',
+            'end_date' => '2026-03-31',
+        ]);
+
+    $component = Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadId', $squad1->id);
+
+    $availableEpics = $component->viewData('availableEpics');
+
+    // Should only see squad1's epic
+    expect($availableEpics)->toHaveCount(1)
+        ->and($availableEpics->pluck('id')->toArray())->toContain($squad1Epic->id)
+        ->and($availableEpics->pluck('id')->toArray())->not->toContain($squad2Epic->id)
+        ->and($availableEpics->pluck('id')->toArray())->not->toContain($unassignedEpic->id);
+});
+
 it('cannot add epic from another team', function () {
-    $user = User::factory()->withPersonalTeam()->create();
     $otherTeam = Team::factory()->create();
-    $squad = Squad::factory()->for($user->currentTeam)->create();
-    $status = Status::first();
     $otherEpic = Epic::factory()
         ->for($otherTeam)
-        ->for($status)
+        ->for($this->status)
         ->create();
 
-    $this->actingAs($user);
-
-    Livewire::test('planning.show')
+    Livewire::test('planning.show', ['plan' => null])
         ->set('selectedQuarter', 'Q1-2026')
-        ->set('selectedSquadId', $squad->id)
+        ->set('selectedSquadId', $this->squad->id)
         ->call('addEpicToPlan', $otherEpic->id)
         ->assertForbidden();
 });
