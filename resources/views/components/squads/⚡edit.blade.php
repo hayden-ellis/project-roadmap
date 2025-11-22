@@ -57,11 +57,11 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 <div class="max-w-3xl">
 
         <form wire:submit="save" >
-            <div class="mb-6">
-                <flux:button href="/squads" variant="ghost" icon="arrow-left" wire:navigate>Back to Squads</flux:button>
+            <div class="pt-8 pb-4">
+                <flux:button href="/squads" variant="ghost" icon="arrow-left" wire:navigate class="mb-3">Back to Squads</flux:button>
             </div>
 
-            <flux:heading size="xl" class="mb-6">Edit Squad</flux:heading>
+            <h1 class="mb-6">Edit Squad</h1>
 
             <flux:card class="space-y-6">
                 <flux:field>

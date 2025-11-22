@@ -55,4 +55,9 @@ class Team extends JetstreamTeam
     {
         return $this->hasMany(Epic::class);
     }
+
+    public function quarterPlans(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(QuarterPlan::class);
+    }
 }

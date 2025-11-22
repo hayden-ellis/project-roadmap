@@ -3,10 +3,10 @@
 use App\Models\Epic;
 use App\Models\Squad;
 use App\Models\Status;
+use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Validate;
 use Livewire\Component;
-use Illuminate\Support\Facades\Auth;
 
 new #[Layout('components.layouts.app.sidebar')] class extends Component
 {
@@ -42,7 +42,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     {
         // When a squad is added, pre-populate with epic dates if they exist
         foreach ($this->squad_ids as $squadId) {
-            if (!isset($this->squad_data[$squadId])) {
+            if (! isset($this->squad_data[$squadId])) {
                 $this->squad_data[$squadId] = [
                     'start_date' => $this->start_date,
                     'end_date' => $this->end_date,
@@ -61,10 +61,45 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         }
     }
 
+    public function applyQuarterPreset(int $squadId, string $preset): void
+    {
+        if (! isset($this->squad_data[$squadId])) {
+            $this->squad_data[$squadId] = [
+                'start_date' => '',
+                'end_date' => '',
+                'story_points' => '',
+            ];
+        }
+
+        $now = \Carbon\Carbon::now();
+        $currentQuarter = ceil($now->month / 3);
+        $currentYear = $now->year;
+
+        if ($preset === 'this-quarter') {
+            $startMonth = ($currentQuarter - 1) * 3 + 1;
+            $startDate = \Carbon\Carbon::create($currentYear, $startMonth, 1)->startOfMonth();
+            $endDate = $startDate->copy()->addMonths(2)->endOfMonth();
+        } else {
+            // next-quarter
+            if ($currentQuarter === 4) {
+                $startMonth = 1;
+                $year = $currentYear + 1;
+            } else {
+                $startMonth = ($currentQuarter * 3) + 1;
+                $year = $currentYear;
+            }
+            $startDate = \Carbon\Carbon::create($year, $startMonth, 1)->startOfMonth();
+            $endDate = $startDate->copy()->addMonths(2)->endOfMonth();
+        }
+
+        $this->squad_data[$squadId]['start_date'] = $startDate->format('Y-m-d');
+        $this->squad_data[$squadId]['end_date'] = $endDate->format('Y-m-d');
+    }
+
     public function save(): void
     {
         $this->authorize('create', Epic::class);
-        
+
         $this->validate();
 
         $epic = Epic::create([
@@ -86,7 +121,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 'story_points' => $this->squad_data[$squadId]['story_points'] ?? null,
             ];
         }
-        
+
         $epic->squads()->attach($attachData);
 
         $this->redirect('/epics', navigate: true);
@@ -105,11 +140,11 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 <div class="max-w-4xl">
 
         <form wire:submit="save">
-            <div class="mb-6">
-                <flux:button href="/epics" variant="ghost" icon="arrow-left" wire:navigate>Back to Epics</flux:button>
+            <div class="pt-8 pb-4">
+                <flux:button href="/epics" variant="ghost" icon="arrow-left" wire:navigate class="mb-3">Back to Epics</flux:button>
             </div>
 
-            <flux:heading size="xl" class="mb-6">Create Epic</flux:heading>
+            <h1 class="mb-6">Create Epic</h1>
 
             <flux:card class="space-y-6">
                 <flux:field>
@@ -193,6 +228,24 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                     
                                     @if(in_array((string)$squad->id, $squad_ids))
                                         <div class="ml-7 space-y-3 pt-3 border-t border-zinc-200 dark:border-zinc-700">
+                                            <!-- Quarter Presets -->
+                                            <div class="flex flex-wrap items-center gap-2 mb-2">
+                                                <flux:text class="text-xs text-zinc-600 dark:text-zinc-400 mr-1">Quick presets:</flux:text>
+                                                <flux:button 
+                                                    wire:click="applyQuarterPreset({{ $squad->id }}, 'this-quarter')" 
+                                                    variant="ghost" 
+                                                    size="xs"
+                                                    class="h-6 text-xs">
+                                                    This Quarter
+                                                </flux:button>
+                                                <flux:button 
+                                                    wire:click="applyQuarterPreset({{ $squad->id }}, 'next-quarter')" 
+                                                    variant="ghost" 
+                                                    size="xs"
+                                                    class="h-6 text-xs">
+                                                    Next Quarter
+                                                </flux:button>
+                                            </div>
                                             <div class="grid grid-cols-2 gap-3">
                                                 <div>
                                                     <flux:label class="text-xs">Start Date</flux:label>

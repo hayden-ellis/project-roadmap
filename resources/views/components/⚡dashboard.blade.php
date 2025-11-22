@@ -23,9 +23,9 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 ?>
 
 <div>
-    <div class="py-6">
-        <flux:heading size="xl">Welcome to Your Roadmap</flux:heading>
-        <flux:text class="mt-2">Plan, track, and manage your product roadmap with your team.</flux:text>
+    <div class="pt-8 pb-10">
+        <h1>Welcome to Your Roadmap</h1>
+        <flux:text class="mt-2 text-zinc-600 dark:text-zinc-400">Plan, track, and manage your product roadmap with your team.</flux:text>
     </div>
 
     @if($squadCount === 0 && $epicCount === 0)
@@ -128,7 +128,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
             {{-- Quick Actions --}}
             <flux:card>
-                <flux:heading size="lg" class="mb-4">Quick Actions</flux:heading>
+                <h2 class="mb-4">Quick Actions</h2>
                 <div class="flex flex-wrap gap-3">
                     <flux:button href="/squads/create" icon="plus" wire:navigate>Create Squad</flux:button>
                     <flux:button href="/epics/create" icon="plus" wire:navigate>Create Epic</flux:button>
@@ -140,7 +140,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             @if($epics->isNotEmpty())
                 <flux:card>
                     <div class="flex items-center justify-between mb-4">
-                        <flux:heading size="lg">Recent Epics</flux:heading>
+                        <h2>Recent Epics</h2>
                         <flux:button href="/epics" variant="ghost" size="sm" wire:navigate>View All</flux:button>
                     </div>
                     <div class="space-y-2">

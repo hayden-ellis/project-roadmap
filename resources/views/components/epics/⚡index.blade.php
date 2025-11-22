@@ -31,8 +31,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
 <div>
     <div>
-        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 py-6">
-            <flux:heading size="xl">Epics</flux:heading>
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pt-8 pb-10">
+            <h1>Epics</h1>
             <flux:button href="/epics/create" icon="plus" wire:navigate class="w-full sm:w-auto">Create Epic</flux:button>
         </div>
 

@@ -49,4 +49,29 @@
   ::file-selector-button {
     border-color: var(--color-gray-200, currentcolor);
   }
+
+  /* Page-level heading hierarchy */
+  h1 {
+    @apply text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100;
+  }
+
+  h2 {
+    @apply text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100;
+  }
+
+  h3 {
+    @apply text-lg font-semibold text-zinc-900 dark:text-zinc-100;
+  }
+
+  h4 {
+    @apply text-lg font-semibold text-zinc-800 dark:text-zinc-200;
+  }
+
+  h5 {
+    @apply text-base font-semibold text-zinc-700 dark:text-zinc-300;
+  }
+
+  h6 {
+    @apply text-sm font-semibold text-zinc-700 dark:text-zinc-300;
+  }
 }

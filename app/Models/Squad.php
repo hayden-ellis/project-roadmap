@@ -25,8 +25,13 @@ class Squad extends Model
     public function epics(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
     {
         return $this->belongsToMany(Epic::class, 'epic_squad')
-            ->withPivot('start_date', 'end_date', 'story_points')
+            ->withPivot('start_date', 'end_date', 'story_points', 'planned_quarter')
             ->withTimestamps();
+    }
+
+    public function quarterPlans(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(QuarterPlan::class);
     }
 
     public function stories(): \Illuminate\Database\Eloquent\Relations\HasMany

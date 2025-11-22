@@ -22,8 +22,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 <div>
     
         <div>
-            <div class="flex items-center justify-between py-6">
-                <flux:heading size="xl">Squads</flux:heading>
+            <div class="flex items-center justify-between pt-8 pb-10">
+                <h1>Squads</h1>
                 <flux:button href="/squads/create" icon="plus" wire:navigate>Create Squad</flux:button>
             </div>
 
