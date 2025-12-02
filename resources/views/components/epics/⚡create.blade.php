@@ -115,10 +115,11 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         // Attach squads with pivot data
         $attachData = [];
         foreach ($this->squad_ids as $squadId) {
+            $storyPoints = $this->squad_data[$squadId]['story_points'] ?? '';
             $attachData[$squadId] = [
                 'start_date' => $this->squad_data[$squadId]['start_date'] ?? null,
                 'end_date' => $this->squad_data[$squadId]['end_date'] ?? null,
-                'story_points' => $this->squad_data[$squadId]['story_points'] ?? null,
+                'story_points' => $storyPoints !== '' ? (int) $storyPoints : null,
             ];
         }
 

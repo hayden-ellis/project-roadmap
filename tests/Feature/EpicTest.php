@@ -686,3 +686,27 @@ it('displays last updated information on epics', function () {
         ->assertSee('Recently Updated Epic')
         ->assertSee('Updated');
 });
+
+it('can create an epic with squads without story points', function () {
+    $user = User::factory()->withPersonalTeam()->create();
+    $squad = Squad::factory()->for($user->currentTeam)->create();
+    $status = Status::where('slug', 'not-started')->first();
+
+    $this->actingAs($user);
+
+    Livewire::test('epics.create')
+        ->set('title', 'Epic Without Story Points')
+        ->set('description', 'Testing empty story points')
+        ->set('status_id', $status->id)
+        ->set('squad_ids', [$squad->id])
+        ->set('squad_data.'.$squad->id.'.start_date', '2026-01-01')
+        ->set('squad_data.'.$squad->id.'.end_date', '2026-03-31')
+        ->set('squad_data.'.$squad->id.'.story_points', '')
+        ->call('save')
+        ->assertRedirect('/epics');
+
+    $epic = Epic::where('title', 'Epic Without Story Points')->first();
+    expect($epic)->not->toBeNull();
+    expect($epic->squads)->toHaveCount(1);
+    expect($epic->squads->first()->pivot->story_points)->toBeNull();
+});
