@@ -469,6 +469,23 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                             @if($epic->description)
                             <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 truncate mt-1">{{ $epic->description }}</flux:text>
                             @endif
+                            @php
+                                $otherSquads = $epic->squads->where('id', '!=', $selectedSquadId);
+                            @endphp
+                            @if($otherSquads->isNotEmpty())
+                            <div class="flex items-center gap-1.5 mt-2 flex-wrap">
+                                <flux:text class="text-xs text-zinc-500 dark:text-zinc-400">Also:</flux:text>
+                                @foreach($otherSquads as $squad)
+                                <div class="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800">
+                                    <div class="h-1.5 w-1.5 rounded-full" style="background-color: {{ $squad->color }}"></div>
+                                    <flux:text class="text-xs text-zinc-600 dark:text-zinc-400">{{ $squad->name }}</flux:text>
+                                    @if($squad->pivot->story_points)
+                                    <flux:text class="text-xs font-medium text-zinc-700 dark:text-zinc-300">({{ $squad->pivot->story_points }})</flux:text>
+                                    @endif
+                                </div>
+                                @endforeach
+                            </div>
+                            @endif
                         </div>
                         <div class="flex items-center gap-2 shrink-0">
                             <flux:text class="text-sm text-zinc-600 dark:text-zinc-400">Story Points:</flux:text>
@@ -530,6 +547,23 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                             </div>
                             @if($epic->description)
                             <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 truncate mt-1">{{ $epic->description }}</flux:text>
+                            @endif
+                            @php
+                                $otherSquads = $epic->squads->where('id', '!=', $selectedSquadId);
+                            @endphp
+                            @if($otherSquads->isNotEmpty())
+                            <div class="flex items-center gap-1.5 mt-2 flex-wrap">
+                                <flux:text class="text-xs text-zinc-500 dark:text-zinc-400">Also:</flux:text>
+                                @foreach($otherSquads as $squad)
+                                <div class="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800">
+                                    <div class="h-1.5 w-1.5 rounded-full" style="background-color: {{ $squad->color }}"></div>
+                                    <flux:text class="text-xs text-zinc-600 dark:text-zinc-400">{{ $squad->name }}</flux:text>
+                                    @if($squad->pivot->story_points)
+                                    <flux:text class="text-xs font-medium text-zinc-700 dark:text-zinc-300">({{ $squad->pivot->story_points }})</flux:text>
+                                    @endif
+                                </div>
+                                @endforeach
+                            </div>
                             @endif
                         </div>
                         <flux:button size="sm" wire:click="addEpicToPlan({{ $epic->id }})" icon="plus" variant="primary" class="shrink-0">

@@ -46,7 +46,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 $this->squad_data[$squadId] = [
                     'start_date' => $this->start_date,
                     'end_date' => $this->end_date,
-                    'story_points' => '',
+                    'story_points' => 0,
                 ];
             }
         }
@@ -67,7 +67,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             $this->squad_data[$squadId] = [
                 'start_date' => '',
                 'end_date' => '',
-                'story_points' => '',
+                'story_points' => 0,
             ];
         }
 
@@ -138,83 +138,94 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 };
 ?>
 
-<div class="max-w-4xl">
+<div class="max-w-7xl">
+    <form wire:submit="save">
+        <div class="pb-4">
+            <flux:button href="/epics" variant="ghost" icon="arrow-left" wire:navigate class="mb-3">Back to Epics</flux:button>
+        </div>
 
-        <form wire:submit="save">
-            <div class="pt-8 pb-4">
-                <flux:button href="/epics" variant="ghost" icon="arrow-left" wire:navigate class="mb-3">Back to Epics</flux:button>
+        <h1 class="mb-6">Create Epic</h1>
+
+        <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            <!-- Main Form (2/3 width on large screens) -->
+            <div class="xl:col-span-2">
+                <flux:card class="space-y-6">
+                    <flux:field>
+                        <flux:label>Title</flux:label>
+                        <flux:input wire:model="title" placeholder="e.g., Payment Gateway Integration" />
+                        <flux:error name="title" />
+                    </flux:field>
+
+                    <flux:field>
+                        <flux:label>Description</flux:label>
+                        <flux:textarea wire:model="description" placeholder="Describe this epic..." rows="4" />
+                        <flux:error name="description" />
+                    </flux:field>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <flux:field>
+                            <flux:label>Status</flux:label>
+                            <flux:select wire:model="status_id">
+                                @foreach($statuses as $status)
+                                    <option value="{{ $status->id }}">{{ $status->name }}</option>
+                                @endforeach
+                            </flux:select>
+                            <flux:error name="status_id" />
+                        </flux:field>
+
+                        <flux:field>
+                            <flux:label>Priority</flux:label>
+                            <flux:select wire:model="priority">
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                                <option value="critical">Critical</option>
+                            </flux:select>
+                            <flux:error name="priority" />
+                        </flux:field>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <flux:field>
+                            <flux:label>Start Date</flux:label>
+                            <flux:input type="date" wire:model="start_date" />
+                            <flux:error name="start_date" />
+                        </flux:field>
+
+                        <flux:field>
+                            <flux:label>End Date</flux:label>
+                            <flux:input type="date" wire:model="end_date" />
+                            <flux:error name="end_date" />
+                        </flux:field>
+                    </div>
+
+                    <div class="flex items-center gap-3">
+                        <flux:button type="submit" variant="primary">Create Epic</flux:button>
+                        <flux:button href="/epics" variant="ghost" wire:navigate>Cancel</flux:button>
+                    </div>
+                </flux:card>
             </div>
 
-            <h1 class="mb-6">Create Epic</h1>
-
-            <flux:card class="space-y-6">
-                <flux:field>
-                    <flux:label>Title</flux:label>
-                    <flux:input wire:model="title" placeholder="e.g., Payment Gateway Integration" />
-                    <flux:error name="title" />
-                </flux:field>
-
-                <flux:field>
-                    <flux:label>Description</flux:label>
-                    <flux:textarea wire:model="description" placeholder="Describe this epic..." rows="4" />
-                    <flux:error name="description" />
-                </flux:field>
-
-                <div class="grid grid-cols-2 gap-4">
-                    <flux:field>
-                        <flux:label>Status</flux:label>
-                        <flux:select wire:model="status_id">
-                            @foreach($statuses as $status)
-                                <option value="{{ $status->id }}">{{ $status->name }}</option>
-                            @endforeach
-                        </flux:select>
-                        <flux:error name="status_id" />
-                    </flux:field>
-
-                    <flux:field>
-                        <flux:label>Priority</flux:label>
-                        <flux:select wire:model="priority">
-                            <option value="low">Low</option>
-                            <option value="medium">Medium</option>
-                            <option value="high">High</option>
-                            <option value="critical">Critical</option>
-                        </flux:select>
-                        <flux:error name="priority" />
-                    </flux:field>
-                </div>
-
-                <div class="grid grid-cols-2 gap-4">
-                    <flux:field>
-                        <flux:label>Start Date</flux:label>
-                        <flux:input type="date" wire:model="start_date" />
-                        <flux:error name="start_date" />
-                    </flux:field>
-
-                    <flux:field>
-                        <flux:label>End Date</flux:label>
-                        <flux:input type="date" wire:model="end_date" />
-                        <flux:error name="end_date" />
-                    </flux:field>
-                </div>
-
-                <flux:field>
-                    <div class="flex items-center justify-between mb-3">
-                        <flux:label>Squads (Optional)</flux:label>
+            <!-- Squads Sidebar (1/3 width on large screens) -->
+            <div class="xl:col-span-1">
+                <flux:card>
+                    <div class="flex items-center justify-between mb-4">
+                        <flux:heading size="lg">Squads</flux:heading>
                         @if(!empty($squad_ids) && ($start_date || $end_date))
                             <flux:button 
                                 wire:click="copyDatesToAllSquads" 
                                 variant="ghost" 
                                 size="xs"
                                 icon="arrow-down">
-                                Copy Epic Dates to All Squads
+                                Copy Dates
                             </flux:button>
                         @endif
                     </div>
                     
                     @if($squads->isEmpty())
-                        <flux:callout icon="information-circle">
+                        <flux:callout icon="information-circle" class="text-sm">
                             <flux:callout.text>
-                                No squads created yet. You can <a href="/squads/create" wire:navigate class="underline font-medium">create a squad first</a> or continue without assigning squads and add them later.
+                                No squads created yet. You can <a href="/squads/create" wire:navigate class="underline font-medium">create a squad first</a>.
                             </flux:callout.text>
                         </flux:callout>
                     @else
@@ -237,17 +248,17 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                                     variant="ghost" 
                                                     size="xs"
                                                     class="h-6 text-xs">
-                                                    This Quarter
+                                                    This Q
                                                 </flux:button>
                                                 <flux:button 
                                                     wire:click="applyQuarterPreset({{ $squad->id }}, 'next-quarter')" 
                                                     variant="ghost" 
                                                     size="xs"
                                                     class="h-6 text-xs">
-                                                    Next Quarter
+                                                    Next Q
                                                 </flux:button>
                                             </div>
-                                            <div class="grid grid-cols-2 gap-3">
+                                            <div class="space-y-2">
                                                 <div>
                                                     <flux:label class="text-xs">Start Date</flux:label>
                                                     <flux:input type="date" wire:model="squad_data.{{ $squad->id }}.start_date" class="text-sm" />
@@ -259,7 +270,20 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                             </div>
                                             <div>
                                                 <flux:label class="text-xs">Story Points</flux:label>
-                                                <flux:input type="number" wire:model="squad_data.{{ $squad->id }}.story_points" placeholder="e.g., 8" class="text-sm" />
+                                                <div class="flex items-center gap-3 -mt-1">
+                                                    <flux:slider 
+                                                        wire:model="squad_data.{{ $squad->id }}.story_points" 
+                                                        min="0" 
+                                                        max="250" 
+                                                        step="5" 
+                                                    />
+                                                    <flux:input 
+                                                        wire:model="squad_data.{{ $squad->id }}.story_points" 
+                                                        type="number" 
+                                                        size="sm" 
+                                                        class="max-w-20" 
+                                                    />
+                                                </div>
                                             </div>
                                         </div>
                                     @endif
@@ -268,13 +292,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                         </div>
                     @endif
                     <flux:error name="squad_ids" />
-                </flux:field>
-
-                <div class="flex items-center gap-3">
-                    <flux:button type="submit" variant="primary">Create Epic</flux:button>
-                    <flux:button href="/epics" variant="ghost" wire:navigate>Cancel</flux:button>
-                </div>
-            </flux:card>
-        </form>
-
+                </flux:card>
+            </div>
+        </div>
+    </form>
 </div>
