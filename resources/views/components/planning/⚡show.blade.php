@@ -507,25 +507,25 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                         <flux:text class="text-sm text-zinc-500">pts capacity</flux:text>
                     </div>
 
-                    <div class="relative h-4 bg-zinc-100 dark:bg-zinc-800 rounded overflow-hidden mb-1">
-                        <div
-                            class="h-full transition-all {{ $data['is_over_allocated'] ? 'bg-red-500' : 'bg-green-500' }}"
-                            style="width: {{ $data['is_over_allocated'] ? 100 : $data['percentage'] }}%"
-                        ></div>
-                        <div class="absolute inset-0 flex items-center justify-center">
-                            <flux:text class="text-xs font-semibold">
-                                {{ $data['allocated'] }} / {{ $data['capacity'] }}
-                            </flux:text>
+                    <div class="flex items-center gap-2 mb-1">
+                        <div class="flex-1 h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+                            <div
+                                class="h-full transition-all rounded-full {{ $data['is_over_allocated'] ? 'bg-red-500' : 'bg-green-500' }}"
+                                style="width: {{ $data['is_over_allocated'] ? 100 : $data['percentage'] }}%"
+                            ></div>
                         </div>
+                        <flux:text class="text-xs font-medium tabular-nums shrink-0 {{ $data['is_over_allocated'] ? 'text-red-600 dark:text-red-400' : 'text-zinc-600 dark:text-zinc-400' }}">
+                            {{ $data['allocated'] }}/{{ $data['capacity'] }}
+                        </flux:text>
                     </div>
 
-                    <flux:text class="text-sm {{ $data['is_over_allocated'] ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400' }}">
+                    <flux:text class="text-xs {{ $data['is_over_allocated'] ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400' }}">
                         @if($data['is_over_allocated'])
-                            +{{ abs($data['remaining']) }} over
+                            {{ abs($data['remaining']) }} over capacity
                         @elseif($data['remaining'] === 0)
                             Fully allocated
                         @else
-                            {{ $data['remaining'] }} left
+                            {{ $data['remaining'] }} pts remaining
                         @endif
                     </flux:text>
                 </flux:card>
@@ -595,7 +595,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                         @forelse($data['planned_epics'] as $epic)
                         <div class="flex items-center gap-2 px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border-l-4 rounded-r" style="border-color: {{ $data['squad']->color }}">
                             <flux:text class="text-sm truncate flex-1">{{ $epic->title }}</flux:text>
-                            <div class="w-14 shrink-0">
+                            <div class="w-18 shrink-0">
                                 <flux:input
                                     type="number"
                                     wire:change.debounce.500ms="updateEpicStoryPoints({{ $epic->id }}, {{ $squadId }}, $event.target.value ? parseInt($event.target.value) : null)"
@@ -633,10 +633,14 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 <div class="flex items-center gap-3 px-3 py-2 bg-zinc-50 dark:bg-zinc-800/30 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-colors">
                     <div class="flex items-center gap-2 min-w-0 flex-1">
                         <flux:text class="text-sm truncate">{{ $epic->title }}</flux:text>
-                        <div class="flex items-center gap-1 shrink-0">
+                        <div class="flex items-center gap-1.5 shrink-0">
                             @foreach($epic->squads->whereIn('id', array_keys($squadData)) as $squad)
-                            <div class="flex items-center gap-0.5">
-                                <div class="h-2 w-2 rounded-full" style="background-color: {{ $squad->color }}"></div>
+                            <div class="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs bg-zinc-100 dark:bg-zinc-700">
+                                <div class="h-1.5 w-1.5 rounded-full" style="background-color: {{ $squad->color }}"></div>
+                                <span class="text-zinc-600 dark:text-zinc-300 max-w-18 truncate">{{ $squad->name }}</span>
+                                @if($squad->pivot->story_points)
+                                <span class="text-zinc-500 dark:text-zinc-400">{{ $squad->pivot->story_points }}</span>
+                                @endif
                                 @if(in_array($squad->id, $epic->planned_for_squad_ids))
                                     <flux:icon.check variant="micro" class="text-green-600 h-3 w-3" />
                                 @endif
