@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Category;
 use App\Models\Epic;
 use App\Models\Squad;
 use App\Models\Status;
@@ -21,6 +22,9 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
     #[Validate('required|exists:statuses,id')]
     public string $status_id = '';
+
+    #[Validate('nullable|exists:categories,id')]
+    public string $category_id = '';
 
     #[Validate('required|in:low,medium,high,critical')]
     public string $priority = 'medium';
@@ -47,6 +51,9 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     public string $original_status_id = '';
 
     #[Locked]
+    public string $original_category_id = '';
+
+    #[Locked]
     public string $original_priority = 'medium';
 
     #[Locked]
@@ -69,6 +76,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->title = $epic->title;
         $this->description = $epic->description ?? '';
         $this->status_id = (string) $epic->status_id;
+        $this->category_id = (string) ($epic->category_id ?? '');
         $this->priority = $epic->priority ?? 'medium';
         $this->start_date = $epic->start_date?->format('Y-m-d') ?? '';
         $this->end_date = $epic->end_date?->format('Y-m-d') ?? '';
@@ -87,6 +95,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->original_title = $this->title;
         $this->original_description = $this->description;
         $this->original_status_id = $this->status_id;
+        $this->original_category_id = $this->category_id;
         $this->original_priority = $this->priority;
         $this->original_start_date = $this->start_date;
         $this->original_end_date = $this->end_date;
@@ -104,6 +113,9 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             return true;
         }
         if ($this->status_id !== $this->original_status_id) {
+            return true;
+        }
+        if ($this->category_id !== $this->original_category_id) {
             return true;
         }
         if ($this->priority !== $this->original_priority) {
@@ -213,6 +225,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
         $this->epic->update([
             'status_id' => $this->status_id,
+            'category_id' => $this->category_id ?: null,
             'priority' => $this->priority,
             'title' => $this->title,
             'description' => $this->description,
@@ -242,6 +255,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->title = $this->original_title;
         $this->description = $this->original_description;
         $this->status_id = $this->original_status_id;
+        $this->category_id = $this->original_category_id;
         $this->priority = $this->original_priority;
         $this->start_date = $this->original_start_date;
         $this->end_date = $this->original_end_date;
@@ -263,6 +277,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         return [
             'statuses' => Status::orderBy('order')->get(),
             'squads' => Auth::user()->currentTeam->squads()->orderBy('name')->get(),
+            'categories' => Auth::user()->currentTeam->categories()->ordered()->get(),
         ];
     }
 };
@@ -314,6 +329,18 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                             <flux:error name="priority" />
                         </flux:field>
                     </div>
+
+                    <flux:field>
+                        <flux:label>Category</flux:label>
+                        <flux:select wire:model.live="category_id">
+                            <option value="">Select a category</option>
+                            @foreach($categories as $category)
+                                <option value="{{ $category->id }}">{{ $category->name }}</option>
+                            @endforeach
+                        </flux:select>
+                        <flux:description>Categorize this epic by type of work</flux:description>
+                        <flux:error name="category_id" />
+                    </flux:field>
 
                     <div class="grid grid-cols-2 gap-4">
                         <flux:field>

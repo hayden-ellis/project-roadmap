@@ -13,6 +13,7 @@ class Epic extends Model
     protected $fillable = [
         'team_id',
         'status_id',
+        'category_id',
         'priority',
         'title',
         'description',
@@ -38,10 +39,16 @@ class Epic extends Model
         return $this->belongsTo(Status::class);
     }
 
+    public function category(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(Category::class);
+    }
+
     public function squads(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
     {
         return $this->belongsToMany(Squad::class, 'epic_squad')
-            ->withPivot('start_date', 'end_date', 'story_points', 'planned_quarter')
+            ->using(EpicSquad::class)
+            ->withPivot('start_date', 'end_date', 'story_points', 'planned_quarter', 'sort_order')
             ->withTimestamps();
     }
 

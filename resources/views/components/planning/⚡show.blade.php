@@ -1,7 +1,10 @@
 <?php
 
+use App\Models\Category;
 use App\Models\Epic;
+use App\Models\EpicSquad;
 use App\Models\QuarterPlan;
+use App\Models\Status;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -18,6 +21,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
     public array $editingCapacityValues = [];
 
+    public array $categoryTargets = [];
+
+    public bool $capacityExpanded = false;
+
     public function mount(?QuarterPlan $plan = null): void
     {
         if ($plan) {
@@ -27,16 +34,12 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             $this->selectedSquadIds = [$plan->squad_id];
             $this->loadQuarterPlans();
         } else {
-            // Create new plan - default to next quarter
+            // Create new plan - default to current quarter
             $now = Carbon::now();
             $currentQuarter = (int) ceil($now->month / 3);
             $currentYear = $now->year;
 
-            if ($currentQuarter === 4) {
-                $this->selectedQuarter = 'Q1-'.($currentYear + 1);
-            } else {
-                $this->selectedQuarter = 'Q'.($currentQuarter + 1)."-{$currentYear}";
-            }
+            $this->selectedQuarter = "Q{$currentQuarter}-{$currentYear}";
 
             // Ensure selectedQuarter is in availableQuarters
             $availableQuarters = $this->getAvailableQuarters();
@@ -51,6 +54,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         if (empty($this->selectedSquadIds) || ! $this->selectedQuarter) {
             $this->quarterPlans = [];
             $this->editingCapacityValues = [];
+            $this->categoryTargets = [];
             return;
         }
 
@@ -61,16 +65,26 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             ->whereIn('squad_id', $this->selectedSquadIds)
             ->where('year', $parsed['year'])
             ->where('quarter', $parsed['quarter'])
+            ->with('categories')
             ->get()
             ->keyBy('squad_id');
 
         $this->quarterPlans = [];
         $this->editingCapacityValues = [];
+        $this->categoryTargets = [];
 
         foreach ($this->selectedSquadIds as $squadId) {
             $plan = $plans->get($squadId);
             $this->quarterPlans[$squadId] = $plan;
             $this->editingCapacityValues[$squadId] = $plan?->available_story_points ?? 0;
+
+            // Load category targets
+            $this->categoryTargets[$squadId] = [];
+            if ($plan) {
+                foreach ($plan->categories as $category) {
+                    $this->categoryTargets[$squadId][$category->id] = $category->pivot->allocated_story_points;
+                }
+            }
         }
     }
 
@@ -81,13 +95,9 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $currentYear = $now->year;
         $currentQuarter = (int) ceil($now->month / 3);
 
-        // Calculate next quarter to start from
-        $nextQuarter = $currentQuarter === 4 ? 1 : $currentQuarter + 1;
-        $nextYear = $currentQuarter === 4 ? $currentYear + 1 : $currentYear;
-
-        // Generate quarters from next quarter to 2 years ahead
-        for ($year = $nextYear; $year <= $currentYear + 2; $year++) {
-            $startQuarter = $year === $nextYear ? $nextQuarter : 1;
+        // Generate quarters from current quarter to 2 years ahead
+        for ($year = $currentYear; $year <= $currentYear + 2; $year++) {
+            $startQuarter = $year === $currentYear ? $currentQuarter : 1;
             for ($q = $startQuarter; $q <= 4; $q++) {
                 $quarters[] = "Q{$q}-{$year}";
             }
@@ -156,6 +166,57 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         );
     }
 
+    public function loadCategoryTargets(int $squadId): void
+    {
+        $plan = $this->quarterPlans[$squadId] ?? null;
+        if (! $plan) {
+            return;
+        }
+
+        $this->categoryTargets[$squadId] = [];
+        foreach ($plan->categories as $category) {
+            $this->categoryTargets[$squadId][$category->id] = $category->pivot->allocated_story_points;
+        }
+    }
+
+    public function saveCategoryTarget(int $squadId, int $categoryId, $points): void
+    {
+        $plan = $this->quarterPlans[$squadId] ?? null;
+        if (! $plan) {
+            return;
+        }
+
+        // Convert to int
+        $points = $points !== '' && $points !== null ? max(0, (int) $points) : 0;
+
+        // Sync or update the category allocation
+        if ($points > 0) {
+            $plan->categories()->syncWithoutDetaching([
+                $categoryId => ['allocated_story_points' => $points],
+            ]);
+        } else {
+            $plan->categories()->detach($categoryId);
+        }
+
+        $this->categoryTargets[$squadId][$categoryId] = $points;
+    }
+
+    public function getActualPointsByCategory(int $squadId): array
+    {
+        $team = Auth::user()->currentTeam;
+
+        return DB::table('epic_squad')
+            ->join('epics', 'epic_squad.epic_id', '=', 'epics.id')
+            ->where('epic_squad.squad_id', $squadId)
+            ->where('epic_squad.planned_quarter', $this->selectedQuarter)
+            ->whereNotNull('epic_squad.story_points')
+            ->where('epics.team_id', $team->id)
+            ->groupBy('epics.category_id')
+            ->selectRaw('epics.category_id, SUM(epic_squad.story_points) as total')
+            ->pluck('total', 'category_id')
+            ->toArray();
+    }
+
     public function getTotalAllocatedPointsForSquad(int $squadId): int
     {
         $team = Auth::user()->currentTeam;
@@ -175,18 +236,65 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $selectedQuarter = $this->selectedQuarter;
 
         return $team->epics()
-            ->with(['status', 'squads'])
+            ->with(['status', 'squads', 'category'])
             ->whereHas('squads', function ($q) use ($squadId, $selectedQuarter) {
                 $q->where('squads.id', $squadId)
                     ->where('epic_squad.planned_quarter', $selectedQuarter);
             })
+            ->join('epic_squad as es_order', function ($join) use ($squadId, $selectedQuarter) {
+                $join->on('epics.id', '=', 'es_order.epic_id')
+                    ->where('es_order.squad_id', '=', $squadId)
+                    ->where('es_order.planned_quarter', '=', $selectedQuarter);
+            })
+            ->orderByRaw('es_order.sort_order IS NULL, es_order.sort_order ASC')
+            ->select('epics.*')
             ->get()
             ->map(function ($epic) use ($squadId) {
                 $plannedPivot = $epic->squads->firstWhere('id', $squadId)?->pivot;
                 $epic->planned_story_points = $plannedPivot->story_points ?? null;
+                $epic->sort_order = $plannedPivot->sort_order ?? null;
 
                 return $epic;
             });
+    }
+
+    public function getBacklogEpicsForSquad(int $squadId): \Illuminate\Support\Collection
+    {
+        $team = Auth::user()->currentTeam;
+        $selectedQuarter = $this->selectedQuarter;
+        $quarterDates = QuarterPlan::getQuarterDates($selectedQuarter);
+
+        // Epics assigned to this squad but NOT in this quarter's plan
+        return $team->epics()
+            ->with(['status', 'squads', 'category'])
+            ->whereHas('squads', function ($q) use ($squadId) {
+                $q->where('squads.id', $squadId);
+            })
+            ->where(function ($query) use ($quarterDates) {
+                // Either overlaps the quarter OR has no dates set
+                $query->where(function ($q) use ($quarterDates) {
+                    $q->whereNotNull('start_date')
+                        ->whereNotNull('end_date')
+                        ->where('start_date', '<=', $quarterDates['end'])
+                        ->where('end_date', '>=', $quarterDates['start']);
+                })
+                ->orWhere(function ($q) {
+                    $q->whereNull('start_date')
+                        ->orWhereNull('end_date');
+                });
+            })
+            ->get()
+            ->filter(function ($epic) use ($squadId, $selectedQuarter) {
+                // Filter out epics that are already planned for this squad in this quarter
+                $squadPivot = $epic->squads->firstWhere('id', $squadId)?->pivot;
+                return ! $squadPivot || $squadPivot->planned_quarter !== $selectedQuarter;
+            })
+            ->map(function ($epic) use ($squadId) {
+                $pivot = $epic->squads->firstWhere('id', $squadId)?->pivot;
+                $epic->existing_story_points = $pivot->story_points ?? null;
+                return $epic;
+            })
+            ->values();
     }
 
     public function getSharedPlannedEpics(): \Illuminate\Support\Collection
@@ -201,7 +309,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
         // Get epics planned for 2+ of the selected squads
         return $team->epics()
-            ->with(['status', 'squads'])
+            ->with(['status', 'squads', 'category'])
             ->get()
             ->filter(function ($epic) use ($selectedSquadIds, $selectedQuarter) {
                 $plannedCount = $epic->squads
@@ -233,7 +341,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $otherSquadIds = array_values(array_diff($this->selectedSquadIds, [$squadId]));
 
         return $team->epics()
-            ->with(['status', 'squads'])
+            ->with(['status', 'squads', 'category'])
             ->whereHas('squads', function ($q) use ($squadId, $selectedQuarter) {
                 $q->where('squads.id', $squadId)
                     ->where('epic_squad.planned_quarter', $selectedQuarter);
@@ -269,7 +377,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
         // Get epics assigned to any selected squad
         return $team->epics()
-            ->with(['status', 'squads'])
+            ->with(['status', 'squads', 'category'])
             ->whereHas('squads', function ($q) use ($selectedSquadIds) {
                 $q->whereIn('squads.id', $selectedSquadIds);
             })
@@ -347,7 +455,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->addEpicToPlan($epicId, $targetSquadIds);
     }
 
-    public function updateEpicStoryPoints(int $epicId, int $squadId, ?int $storyPoints): void
+    public function updateEpicStoryPoints(int $epicId, int $squadId, $storyPoints): void
     {
         if (! in_array($squadId, $this->selectedSquadIds)) {
             return;
@@ -356,10 +464,36 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $epic = Epic::findOrFail($epicId);
         $this->authorizeEpic($epic);
 
+        // Convert to int or null
+        $storyPoints = $storyPoints !== '' && $storyPoints !== null ? (int) $storyPoints : null;
+
         $epic->squads()->updateExistingPivot($squadId, [
             'story_points' => $storyPoints,
             'planned_quarter' => $this->selectedQuarter,
         ]);
+    }
+
+    #[\Livewire\Attributes\Renderless]
+    public function updateEpicFromPopover(int $epicId, int $squadId, $title, $storyPoints, $statusId, $categoryId, $description): void
+    {
+        $epic = Epic::findOrFail($epicId);
+        $this->authorizeEpic($epic);
+
+        // Update epic fields
+        $epic->update([
+            'title' => $title,
+            'status_id' => $statusId,
+            'category_id' => $categoryId ?: null,
+            'description' => $description ?: null,
+        ]);
+
+        // Update story points on the pivot if squad is in selected squads
+        if (in_array($squadId, $this->selectedSquadIds)) {
+            $storyPoints = $storyPoints !== '' && $storyPoints !== null ? (int) $storyPoints : null;
+            $epic->squads()->updateExistingPivot($squadId, [
+                'story_points' => $storyPoints,
+            ]);
+        }
     }
 
     public function removeEpicFromPlan(int $epicId, int $squadId): void
@@ -373,7 +507,69 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
         $epic->squads()->updateExistingPivot($squadId, [
             'planned_quarter' => null,
+            'sort_order' => null,
         ]);
+    }
+
+    public function toggleCapacity(): void
+    {
+        $this->capacityExpanded = ! $this->capacityExpanded;
+    }
+
+    public function sort($item, $position, $column, $squadId = null): void
+    {
+        $squadId = $squadId ?? $this->selectedSquadIds[0] ?? null;
+        if (! $squadId || ! in_array($squadId, $this->selectedSquadIds)) {
+            return;
+        }
+
+        $team = Auth::user()->currentTeam;
+        $epicId = (int) $item;
+
+        // Verify epic belongs to team
+        $epic = Epic::where('id', $epicId)->where('team_id', $team->id)->first();
+        if (! $epic) {
+            return;
+        }
+
+        $epicSquad = EpicSquad::where('epic_id', $epicId)
+            ->where('squad_id', $squadId)
+            ->first();
+
+        if ($column === 'backlog') {
+            // Remove from plan
+            if ($epicSquad) {
+                $epicSquad->update([
+                    'planned_quarter' => null,
+                    'sort_order' => null,
+                ]);
+            }
+
+            return;
+        }
+
+        // Column is a category ID (or 'uncategorized')
+        $categoryId = $column === 'uncategorized' ? null : (int) $column;
+
+        // Update epic's category if changed
+        if ($epic->category_id !== $categoryId) {
+            $epic->update(['category_id' => $categoryId]);
+        }
+
+        // Add to plan if not already
+        if (! $epicSquad || $epicSquad->planned_quarter !== $this->selectedQuarter) {
+            $existingPoints = $epicSquad?->story_points;
+
+            $epicSquad = EpicSquad::updateOrCreate(
+                ['epic_id' => $epicId, 'squad_id' => $squadId],
+                [
+                    'planned_quarter' => $this->selectedQuarter,
+                    'story_points' => $existingPoints,
+                ]
+            );
+        }
+
+        $epicSquad->move($position);
     }
 
     private function authorizeEpic(Epic $epic): void
@@ -417,8 +613,13 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 'planned_epics' => $isMultiSquadView
                     ? $this->getUniqueEpicsForSquad($squadId)
                     : $this->getPlannedEpicsForSquad($squadId),
+                'backlog_epics' => $this->getBacklogEpicsForSquad($squadId),
+                'actual_by_category' => $this->getActualPointsByCategory($squadId),
             ];
         }
+
+        $categories = Auth::user()->currentTeam->categories()->ordered()->get();
+        $statuses = Status::orderBy('order')->get();
 
         return [
             'squads' => $squads,
@@ -429,6 +630,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             'availableEpics' => $this->getAvailableEpics(),
             'availableQuarters' => $this->getAvailableQuarters(),
             'isMultiSquadView' => $isMultiSquadView,
+            'categories' => $categories,
+            'statuses' => $statuses,
+            'categoryTargets' => $this->categoryTargets,
+            'capacityExpanded' => $this->capacityExpanded,
         ];
     }
 };
@@ -484,6 +689,44 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     @if(!empty($selectedSquadIds))
         @if($isMultiSquadView)
             {{-- Multi-Squad View --}}
+
+            {{-- Summary Stats Bar --}}
+            @php
+                $totalCapacity = collect($squadData)->sum('capacity');
+                $totalAllocatedMulti = collect($squadData)->sum('allocated');
+                $totalPlanned = collect($squadData)->sum(fn($d) => $d['planned_epics']->count());
+                $overallPercentage = $totalCapacity > 0 ? round(($totalAllocatedMulti / $totalCapacity) * 100) : 0;
+                $anyOverAllocated = collect($squadData)->contains('is_over_allocated', true);
+            @endphp
+            <div class="flex flex-wrap items-center gap-4 mb-4 px-4 py-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg border border-zinc-200 dark:border-zinc-700">
+                <div class="flex items-center gap-2">
+                    <flux:icon.user-group variant="mini" class="text-zinc-500" />
+                    <flux:text class="font-medium">{{ count($squadData) }} squads</flux:text>
+                </div>
+                <flux:separator vertical class="h-5" />
+                <div class="flex items-center gap-1.5">
+                    <flux:text class="text-sm text-zinc-500">Combined:</flux:text>
+                    <flux:text class="text-sm font-medium tabular-nums {{ $anyOverAllocated ? 'text-red-600' : '' }}">
+                        {{ $totalAllocatedMulti }}/{{ $totalCapacity }} pts
+                    </flux:text>
+                    <span class="text-xs text-zinc-400">({{ $overallPercentage }}%)</span>
+                </div>
+                <flux:separator vertical class="h-5" />
+                <div class="flex items-center gap-1.5">
+                    <flux:icon.clipboard-document-check variant="micro" class="text-green-600" />
+                    <flux:text class="text-sm">{{ $totalPlanned }} planned</flux:text>
+                </div>
+                @if($sharedEpics->isNotEmpty())
+                <flux:separator vertical class="h-5" />
+                <div class="flex items-center gap-1.5">
+                    <flux:icon.link variant="micro" class="text-purple-500" />
+                    <flux:text class="text-sm">{{ $sharedEpics->count() }} shared</flux:text>
+                </div>
+                @endif
+                @if($anyOverAllocated)
+                <flux:badge color="red" size="sm">Some squads over capacity</flux:badge>
+                @endif
+            </div>
 
             {{-- Capacity Cards Row --}}
             <div class="grid gap-4 mb-6" style="grid-template-columns: repeat({{ count($squadData) }}, minmax(0, 1fr));">
@@ -559,7 +802,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                     <div class="w-18">
                                         <flux:input
                                             type="number"
-                                            wire:change.debounce.500ms="updateEpicStoryPoints({{ $epic->id }}, {{ $squadId }}, $event.target.value ? parseInt($event.target.value) : null)"
+                                            wire:change.debounce.500ms="updateEpicStoryPoints({{ $epic->id }}, {{ $squadId }}, $event.target.value)"
                                             value="{{ $epic->squad_story_points[$squadId] }}"
                                             min="0"
                                             placeholder="pts"
@@ -598,7 +841,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                             <div class="w-18 shrink-0">
                                 <flux:input
                                     type="number"
-                                    wire:change.debounce.500ms="updateEpicStoryPoints({{ $epic->id }}, {{ $squadId }}, $event.target.value ? parseInt($event.target.value) : null)"
+                                    wire:change.debounce.500ms="updateEpicStoryPoints({{ $epic->id }}, {{ $squadId }}, $event.target.value)"
                                     value="{{ $epic->planned_story_points }}"
                                     min="0"
                                     placeholder="pts"
@@ -681,207 +924,302 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             </div>
 
         @else
-            {{-- Single Squad View (original design) --}}
+            {{-- Single Squad View - Kanban Layout --}}
             @php
                 $singleSquadId = $selectedSquadIds[0] ?? null;
                 $data = $squadData[$singleSquadId] ?? null;
             @endphp
 
             @if($data)
-            <flux:card class="mb-6">
-                @php
-                    $percentage = $data['percentage'];
-                    $isOverAllocated = $data['is_over_allocated'];
-                    $remaining = $data['remaining'];
-                    $capacity = $data['capacity'];
-                    $totalAllocated = $data['allocated'];
-                @endphp
+            @php
+                $percentage = $data['percentage'];
+                $isOverAllocated = $data['is_over_allocated'];
+                $remaining = $data['remaining'];
+                $capacity = $data['capacity'];
+                $totalAllocated = $data['allocated'];
+                $actualByCategory = $data['actual_by_category'] ?? [];
+                $backlogEpics = $data['backlog_epics'] ?? collect();
+                $plannedEpics = $data['planned_epics'] ?? collect();
 
-                <div class="flex items-center gap-4">
-                    <div class="flex items-center gap-3 shrink-0">
-                        <div class="flex items-center gap-2">
-                            <div class="h-3 w-3 rounded-full" style="background-color: {{ $data['squad']->color }}"></div>
-                            <flux:text class="font-medium">{{ $data['squad']->name }}</flux:text>
-                        </div>
-                        <div class="h-4 w-px bg-zinc-300 dark:bg-zinc-700"></div>
-                        <div class="flex items-center gap-1.5 w-28">
-                            <flux:input
-                                type="number"
-                                wire:model.blur="editingCapacityValues.{{ $singleSquadId }}"
-                                wire:change="saveCapacityForSquad({{ $singleSquadId }})"
-                                min="0"
-                                placeholder="0"
+                // Group planned epics by category
+                $plannedByCategory = $plannedEpics->groupBy(fn($e) => $e->category_id ?? 'uncategorized');
+
+                // Calculate category data
+                $categoryData = [];
+                foreach ($categories as $category) {
+                    $target = $categoryTargets[$singleSquadId][$category->id] ?? 0;
+                    $actual = $actualByCategory[$category->id] ?? 0;
+                    $categoryData[$category->id] = [
+                        'category' => $category,
+                        'target' => $target,
+                        'actual' => $actual,
+                    ];
+                }
+            @endphp
+
+            {{-- Summary Stats Bar --}}
+            <div class="flex flex-wrap items-center gap-4 mb-4 px-4 py-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg border border-zinc-200 dark:border-zinc-700">
+                <div class="flex items-center gap-2">
+                    <div class="h-3 w-3 rounded-full" style="background-color: {{ $data['squad']->color }}"></div>
+                    <flux:text class="font-medium">{{ $data['squad']->name }}</flux:text>
+                </div>
+                <flux:separator vertical class="h-5" />
+                <div class="flex items-center gap-1.5">
+                    <flux:text class="text-sm text-zinc-500">Capacity:</flux:text>
+                    <flux:text class="text-sm font-medium tabular-nums {{ $isOverAllocated ? 'text-red-600' : '' }}">
+                        {{ $totalAllocated }}/{{ $capacity }} pts
+                    </flux:text>
+                    @if($capacity > 0)
+                    <span class="text-xs text-zinc-400">({{ round($percentage) }}%)</span>
+                    @endif
+                </div>
+                <flux:separator vertical class="h-5" />
+                <div class="flex items-center gap-1.5">
+                    <flux:icon.clipboard-document-check variant="micro" class="text-green-600" />
+                    <flux:text class="text-sm">{{ $plannedEpics->count() }} planned</flux:text>
+                </div>
+                <flux:separator vertical class="h-5" />
+                <div class="flex items-center gap-1.5">
+                    <flux:icon.inbox variant="micro" class="text-zinc-400" />
+                    <flux:text class="text-sm">{{ $backlogEpics->count() }} in backlog</flux:text>
+                </div>
+                @if($isOverAllocated)
+                <flux:badge color="red" size="sm">{{ abs($remaining) }} pts over</flux:badge>
+                @elseif($remaining > 0)
+                <flux:badge color="green" size="sm">{{ $remaining }} pts free</flux:badge>
+                @endif
+            </div>
+
+            {{-- Collapsible Capacity & Categories Section --}}
+            <div class="mb-6" x-data="{ expanded: @js($capacityExpanded) }" x-cloak>
+                <flux:card class="overflow-hidden">
+                    {{-- Collapsed Header (always visible) --}}
+                    <button
+                        type="button"
+                        @click="expanded = !expanded; $wire.toggleCapacity()"
+                        class="w-full flex items-center justify-between gap-4 p-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
+                    >
+                        <div class="flex items-center gap-3">
+                            <flux:icon.chevron-right
+                                variant="mini"
+                                class="text-zinc-400 transition-transform duration-200"
+                                x-bind:class="{ 'rotate-90': expanded }"
                             />
-                            <flux:text class="text-sm text-zinc-600 dark:text-zinc-400">pts</flux:text>
+                            <flux:text class="font-medium">Capacity & Categories</flux:text>
                         </div>
-                    </div>
-
-                    <div class="relative h-6 flex-1 bg-zinc-100 dark:bg-zinc-800 rounded-md overflow-hidden">
-                        <div
-                            class="h-full transition-all duration-300 {{ $isOverAllocated ? 'bg-red-500 dark:bg-red-600' : 'bg-green-500 dark:bg-green-600' }}"
-                            style="width: {{ $isOverAllocated ? '100' : $percentage }}%"
-                        ></div>
-                        <div class="absolute inset-0 flex items-center justify-center">
-                            <flux:text class="text-xs font-semibold {{ $percentage > 50 ? 'text-white' : 'text-zinc-900 dark:text-zinc-100' }}">
-                                {{ $totalAllocated }} / {{ $capacity }}
-                                @if($capacity > 0)
-                                ({{ number_format($percentage, 0) }}%)
+                        <div class="flex items-center gap-3 flex-1 max-w-md">
+                            {{-- Mini progress bar --}}
+                            <div class="flex-1 h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden {{ $isOverAllocated ? 'ring-1 ring-red-500' : '' }}">
+                                @if($totalAllocated > 0 && $capacity > 0)
+                                <div class="h-full flex" style="width: {{ min($percentage, 100) }}%">
+                                    @foreach($categoryData as $catData)
+                                        @if($catData['actual'] > 0)
+                                        <div
+                                            class="h-full"
+                                            style="width: {{ ($catData['actual'] / $totalAllocated) * 100 }}%; background-color: {{ $catData['category']->color ?? '#6B7280' }};"
+                                        ></div>
+                                        @endif
+                                    @endforeach
+                                </div>
                                 @endif
+                            </div>
+                            <flux:text class="text-sm tabular-nums shrink-0 {{ $isOverAllocated ? 'text-red-600' : 'text-zinc-600 dark:text-zinc-400' }}">
+                                {{ $totalAllocated }}/{{ $capacity }}
                             </flux:text>
                         </div>
-                    </div>
+                    </button>
 
-                    <div class="flex items-center gap-2 shrink-0">
-                        <flux:text class="text-sm whitespace-nowrap">
-                            @if($isOverAllocated)
-                                <span class="text-red-600 dark:text-red-400 font-medium">+{{ abs($remaining) }}</span>
-                            @elseif($remaining === 0)
-                                <span class="text-green-600 dark:text-green-400 font-medium">✓</span>
-                            @else
-                                <span class="text-green-600 dark:text-green-400 font-medium">{{ $remaining }} left</span>
+                    {{-- Expanded Content --}}
+                    <div
+                        x-show="expanded"
+                        x-collapse
+                        class="border-t border-zinc-100 dark:border-zinc-800"
+                    >
+                        <div class="p-4 space-y-4">
+                            {{-- Capacity Input --}}
+                            <div class="flex items-center gap-3">
+                                <flux:label class="text-sm">Total Capacity:</flux:label>
+                                <div class="w-24">
+                                    <flux:input
+                                        type="number"
+                                        wire:model.blur="editingCapacityValues.{{ $singleSquadId }}"
+                                        wire:change="saveCapacityForSquad({{ $singleSquadId }})"
+                                        min="0"
+                                        placeholder="0"
+                                        size="sm"
+                                    />
+                                </div>
+                                <flux:text class="text-sm text-zinc-500">story points</flux:text>
+                            </div>
+
+                            {{-- Stacked progress bar (larger) --}}
+                            <div class="h-4 rounded-full overflow-hidden bg-zinc-100 dark:bg-zinc-800 {{ $isOverAllocated ? 'ring-2 ring-red-500' : '' }}">
+                                @if($totalAllocated > 0 && $capacity > 0)
+                                    <div class="h-full flex" style="width: {{ min($percentage, 100) }}%">
+                                        @foreach($categoryData as $catData)
+                                            @if($catData['actual'] > 0)
+                                            <div
+                                                class="h-full"
+                                                style="width: {{ ($catData['actual'] / $totalAllocated) * 100 }}%; background-color: {{ $catData['category']->color ?? '#6B7280' }};"
+                                                title="{{ $catData['category']->name }}: {{ $catData['actual'] }} pts"
+                                            ></div>
+                                            @endif
+                                        @endforeach
+                                    </div>
+                                @endif
+                            </div>
+
+                            {{-- Category targets --}}
+                            @if($categories->isNotEmpty())
+                            <div class="pt-2">
+                                <flux:text class="text-xs font-medium text-zinc-500 uppercase tracking-wide mb-3">Category Targets</flux:text>
+                                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                                    @foreach($categoryData as $catId => $catData)
+                                        @php
+                                            $isOver = $catData['target'] > 0 && $catData['actual'] > $catData['target'];
+                                        @endphp
+                                        <div class="flex items-center gap-2 p-2 bg-zinc-50 dark:bg-zinc-800/50 rounded">
+                                            <div class="h-3 w-3 rounded" style="background-color: {{ $catData['category']->color ?? '#6B7280' }}"></div>
+                                            <div class="flex-1 min-w-0">
+                                                <flux:text class="text-xs truncate">{{ $catData['category']->name }}</flux:text>
+                                                <div class="flex items-center gap-1">
+                                                    <flux:text class="text-xs font-medium tabular-nums {{ $isOver ? 'text-red-600' : '' }}">{{ $catData['actual'] }}</flux:text>
+                                                    <span class="text-zinc-400 text-xs">/</span>
+                                                    <div class="w-18">
+                                                        <flux:input
+                                                            type="number"
+                                                            wire:change="saveCategoryTarget({{ $singleSquadId }}, {{ $catId }}, $event.target.value)"
+                                                            value="{{ $catData['target'] ?: '' }}"
+                                                            min="0"
+                                                            placeholder="–"
+                                                            size="sm"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    @endforeach
+                                </div>
+                            </div>
                             @endif
-                        </flux:text>
-                        @if($isOverAllocated)
-                        <flux:badge color="red" size="sm">Over</flux:badge>
-                        @endif
-                    </div>
-                </div>
-            </flux:card>
-
-            <div class="mb-6">
-                <h2 class="mb-6">Plan Epics</h2>
-
-                <div class="mb-8">
-                    <div class="flex items-center gap-3 mb-5">
-                        <h3 class="text-green-600 dark:text-green-400">In Plan</h3>
-                        <div class="flex-1 h-px bg-green-200 dark:bg-green-900"></div>
-                        <flux:badge color="green" size="sm">{{ $data['planned_epics']->count() }} epic{{ $data['planned_epics']->count() !== 1 ? 's' : '' }}</flux:badge>
-                    </div>
-
-                    @if($data['planned_epics']->isEmpty())
-                    <flux:card class="border-2 border-dashed border-zinc-300 dark:border-zinc-700">
-                        <div class="text-center py-8">
-                            <flux:text class="text-zinc-500 dark:text-zinc-400">No epics in plan yet. Add epics from below.</flux:text>
                         </div>
-                    </flux:card>
-                    @else
-                    <div class="space-y-2">
-                        @foreach($data['planned_epics'] as $epic)
-                        <flux:card class="p-4 border-l-4 border-green-500 bg-green-50/50 dark:bg-green-950/20">
-                            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                                <div class="flex-1 min-w-0">
-                                    <div class="flex items-center gap-2 flex-wrap">
-                                        <flux:heading size="base">{{ $epic->title }}</flux:heading>
-                                        <flux:badge :color="$epic->status->slug === 'completed' ? 'green' : ($epic->status->slug === 'in-progress' ? 'blue' : ($epic->status->slug === 'blocked' ? 'red' : 'zinc'))" size="sm">
-                                            {{ $epic->status->name }}
-                                        </flux:badge>
-                                    </div>
-                                    @if($epic->description)
-                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 truncate mt-1">{{ $epic->description }}</flux:text>
-                                    @endif
-                                    @php
-                                        $otherSquads = $epic->squads->where('id', '!=', $singleSquadId);
-                                    @endphp
-                                    @if($otherSquads->isNotEmpty())
-                                    <div class="flex items-center gap-1.5 mt-2 flex-wrap">
-                                        <flux:text class="text-xs text-zinc-500 dark:text-zinc-400">Also:</flux:text>
-                                        @foreach($otherSquads as $squad)
-                                        <div class="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800">
-                                            <div class="h-1.5 w-1.5 rounded-full" style="background-color: {{ $squad->color }}"></div>
-                                            <flux:text class="text-xs text-zinc-600 dark:text-zinc-400">{{ $squad->name }}</flux:text>
-                                            @if($squad->pivot->story_points)
-                                            <flux:text class="text-xs font-medium text-zinc-700 dark:text-zinc-300">({{ $squad->pivot->story_points }})</flux:text>
-                                            @endif
-                                        </div>
-                                        @endforeach
-                                    </div>
-                                    @endif
-                                </div>
-                                <div class="flex items-center gap-2 shrink-0">
-                                    <flux:text class="text-sm text-zinc-600 dark:text-zinc-400">Story Points:</flux:text>
-                                    <div class="w-24">
-                                        <flux:input type="number" wire:change.debounce.500ms="updateEpicStoryPoints({{ $epic->id }}, {{ $singleSquadId }}, $event.target.value ? parseInt($event.target.value) : null)" value="{{ $epic->planned_story_points }}" min="0" placeholder="Points" />
-                                    </div>
-                                    <flux:button variant="ghost" size="sm" wire:click="removeEpicFromPlan({{ $epic->id }}, {{ $singleSquadId }})" icon="x-mark" class="text-red-600 dark:text-red-400">
-                                        Remove
-                                    </flux:button>
-                                </div>
+                    </div>
+                </flux:card>
+            </div>
+
+            {{-- Category Columns for Planned Items --}}
+            <flux:kanban class="[&>[data-flux-kanban-column]]:flex-1">
+                @foreach($categories as $category)
+                    @php
+                        $categoryEpics = $plannedByCategory->get($category->id, collect());
+                        $categoryPoints = $categoryEpics->sum('planned_story_points');
+                        $target = $categoryTargets[$singleSquadId][$category->id] ?? 0;
+                        $isOver = $target > 0 && $categoryPoints > $target;
+                    @endphp
+
+                    <flux:kanban.column class="flex-1 w-auto max-w-none">
+                        <flux:kanban.column.header>
+                            <div class="flex items-center gap-2 w-full">
+                                <div class="h-3 w-3 rounded" style="background-color: {{ $category->color }}"></div>
+                                <span class="font-medium">{{ $category->name }}</span>
+                                <flux:badge :color="$isOver ? 'red' : 'zinc'" size="sm">
+                                    {{ $categoryPoints }}{{ $target ? "/$target" : '' }} pts
+                                </flux:badge>
                             </div>
-                        </flux:card>
-                        @endforeach
-                    </div>
-                    @endif
-                </div>
+                        </flux:kanban.column.header>
 
-                <div class="relative my-8">
-                    <div class="absolute inset-0 flex items-center">
-                        <div class="w-full border-t border-zinc-300 dark:border-zinc-700"></div>
-                    </div>
-                    <div class="relative flex justify-center text-sm">
-                        <span class="bg-white dark:bg-zinc-900 px-4 text-zinc-500 dark:text-zinc-400">Available to Add</span>
-                    </div>
-                </div>
+                        <flux:kanban.column.cards
+                            x-sort="$wire.sort($item, $position, {{ $category->id }}, {{ $singleSquadId }})"
+                            x-sort:group="planning-{{ $singleSquadId }}"
+                        >
+                            @forelse($categoryEpics as $epic)
+                                <x-planning.kanban-card
+                                    :epic="$epic"
+                                    :squadId="$singleSquadId"
+                                    :planned="true"
+                                    :statuses="$statuses"
+                                    :categories="$categories"
+                                />
+                            @empty
+                                <div class="min-h-[100px] border-2 border-dashed border-zinc-300 dark:border-zinc-600 rounded-lg"></div>
+                            @endforelse
+                        </flux:kanban.column.cards>
+                    </flux:kanban.column>
+                @endforeach
 
-                <div>
-                    <div class="flex items-center gap-3 mb-5">
-                        <h3 class="text-zinc-600 dark:text-zinc-400">Available Epics</h3>
-                        <div class="flex-1 h-px bg-zinc-200 dark:bg-zinc-800"></div>
-                        <flux:badge color="zinc" size="sm">{{ $availableEpics->count() }} epic{{ $availableEpics->count() !== 1 ? 's' : '' }}</flux:badge>
+                {{-- Uncategorized Column --}}
+                @php $uncategorized = $plannedByCategory->get('uncategorized', collect()); @endphp
+                @if($uncategorized->isNotEmpty() || $categories->isEmpty())
+                    <flux:kanban.column class="flex-1 w-auto max-w-none">
+                        <flux:kanban.column.header>
+                            <div class="flex items-center gap-2">
+                                <flux:icon.question-mark-circle variant="micro" class="text-zinc-400" />
+                                <span class="font-medium text-zinc-500">Uncategorized</span>
+                                <flux:badge color="zinc" size="sm">{{ $uncategorized->sum('planned_story_points') }} pts</flux:badge>
+                            </div>
+                        </flux:kanban.column.header>
+
+                        <flux:kanban.column.cards
+                            x-sort="$wire.sort($item, $position, 'uncategorized', {{ $singleSquadId }})"
+                            x-sort:group="planning-{{ $singleSquadId }}"
+                        >
+                            @forelse($uncategorized as $epic)
+                                <x-planning.kanban-card
+                                    :epic="$epic"
+                                    :squadId="$singleSquadId"
+                                    :planned="true"
+                                    :statuses="$statuses"
+                                    :categories="$categories"
+                                />
+                            @empty
+                                <div class="min-h-[100px] border-2 border-dashed border-zinc-300 dark:border-zinc-600 rounded-lg"></div>
+                            @endforelse
+                        </flux:kanban.column.cards>
+                    </flux:kanban.column>
+                @endif
+            </flux:kanban>
+
+            {{-- Backlog Section (Below) --}}
+            <div class="mt-6 border-t border-zinc-200 dark:border-zinc-700 pt-6">
+                <div x-data="{ expanded: true }" class="space-y-3">
+                    {{-- Backlog Header --}}
+                    <div class="flex items-center justify-between">
+                        <button
+                            @click="expanded = !expanded"
+                            class="flex items-center gap-2 text-left"
+                        >
+                            <flux:icon.chevron-right
+                                class="h-4 w-4 text-zinc-400 transition-transform"
+                                ::class="expanded && 'rotate-90'"
+                            />
+                            <flux:icon.inbox variant="mini" class="text-zinc-400" />
+                            <span class="font-medium text-zinc-600 dark:text-zinc-400">Backlog</span>
+                            <flux:badge color="zinc" size="sm">{{ $backlogEpics->count() }}</flux:badge>
+                        </button>
                     </div>
 
-                    @if($availableEpics->isEmpty())
-                    <flux:card class="border-2 border-dashed border-zinc-300 dark:border-zinc-700">
-                        <div class="text-center py-8">
-                            <flux:text class="text-zinc-500 dark:text-zinc-400">No available epics found for {{ $data['squad']->name }} in {{ $selectedQuarter }}.</flux:text>
+                    {{-- Backlog Cards (Horizontal Scroll) --}}
+                    <div
+                        x-show="expanded"
+                        x-collapse
+                        class="overflow-x-auto pb-2"
+                    >
+                        <div
+                            class="flex gap-3 min-w-max"
+                            x-sort="$wire.sort($item, $position, 'backlog', {{ $singleSquadId }})"
+                            x-sort:group="planning-{{ $singleSquadId }}"
+                        >
+                            @forelse($backlogEpics as $epic)
+                                <div class="w-80 shrink-0">
+                                    <x-planning.kanban-card :$epic :squadId="$singleSquadId" />
+                                </div>
+                            @empty
+                                <div class="text-zinc-400 text-sm py-4">
+                                    No epics in backlog. Assign epics to this squad to see them here.
+                                </div>
+                            @endforelse
                         </div>
-                    </flux:card>
-                    @else
-                    <div class="space-y-2">
-                        @foreach($availableEpics as $epic)
-                        <flux:card class="p-4 opacity-90 hover:opacity-100 transition-opacity">
-                            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                                <div class="flex-1 min-w-0">
-                                    <div class="flex items-center gap-2 flex-wrap">
-                                        <flux:heading size="base">{{ $epic->title }}</flux:heading>
-                                        <flux:badge :color="$epic->status->slug === 'completed' ? 'green' : ($epic->status->slug === 'in-progress' ? 'blue' : ($epic->status->slug === 'blocked' ? 'red' : 'zinc'))" size="sm">
-                                            {{ $epic->status->name }}
-                                        </flux:badge>
-                                        @if($epic->squads->firstWhere('id', $singleSquadId)?->pivot->story_points)
-                                        <flux:badge color="blue" size="sm">{{ $epic->squads->firstWhere('id', $singleSquadId)->pivot->story_points }} pts</flux:badge>
-                                        @endif
-                                        @if($epic->start_date && $epic->end_date)
-                                        <flux:badge color="zinc" size="sm">Overlaps quarter</flux:badge>
-                                        @endif
-                                    </div>
-                                    @if($epic->description)
-                                    <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 truncate mt-1">{{ $epic->description }}</flux:text>
-                                    @endif
-                                    @php
-                                        $otherSquads = $epic->squads->where('id', '!=', $singleSquadId);
-                                    @endphp
-                                    @if($otherSquads->isNotEmpty())
-                                    <div class="flex items-center gap-1.5 mt-2 flex-wrap">
-                                        <flux:text class="text-xs text-zinc-500 dark:text-zinc-400">Also:</flux:text>
-                                        @foreach($otherSquads as $squad)
-                                        <div class="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800">
-                                            <div class="h-1.5 w-1.5 rounded-full" style="background-color: {{ $squad->color }}"></div>
-                                            <flux:text class="text-xs text-zinc-600 dark:text-zinc-400">{{ $squad->name }}</flux:text>
-                                            @if($squad->pivot->story_points)
-                                            <flux:text class="text-xs font-medium text-zinc-700 dark:text-zinc-300">({{ $squad->pivot->story_points }})</flux:text>
-                                            @endif
-                                        </div>
-                                        @endforeach
-                                    </div>
-                                    @endif
-                                </div>
-                                <flux:button size="sm" wire:click="addEpicToPlan({{ $epic->id }}, [{{ $singleSquadId }}])" icon="plus" variant="primary" class="shrink-0">
-                                    Add to Plan
-                                </flux:button>
-                            </div>
-                        </flux:card>
-                        @endforeach
                     </div>
-                    @endif
                 </div>
             </div>
             @endif

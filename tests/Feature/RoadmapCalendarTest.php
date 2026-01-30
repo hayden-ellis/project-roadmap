@@ -74,10 +74,10 @@ it('can update squad work inline from calendar', function () {
     Livewire::test('roadmap.calendar')
         ->call('updateSquadWork', $epic->id, $squad->id, now()->addDays(15)->format('Y-m-d'), now()->addDays(35)->format('Y-m-d'), 30);
 
-    expect($epic->squads()->first()->pivot)
-        ->start_date->toEqual(now()->addDays(15)->format('Y-m-d'))
-        ->end_date->toEqual(now()->addDays(35)->format('Y-m-d'))
-        ->story_points->toBe(30);
+    $pivot = $epic->squads()->first()->pivot;
+    expect($pivot->start_date->format('Y-m-d'))->toEqual(now()->addDays(15)->format('Y-m-d'))
+        ->and($pivot->end_date->format('Y-m-d'))->toEqual(now()->addDays(35)->format('Y-m-d'))
+        ->and($pivot->story_points)->toBe(30);
 });
 
 it('can clear squad work values with null', function () {

@@ -25,16 +25,24 @@ it('can view planning page', function () {
     $this->get('/planning')->assertSuccessful();
 });
 
-it('defaults to next quarter', function () {
+it('defaults to current quarter', function () {
     $component = Livewire::test('planning.show', ['plan' => null]);
     $selectedQuarter = $component->get('selectedQuarter');
 
     // Verify it's a valid quarter format (Q1-Q4-YYYY)
     expect($selectedQuarter)->toBeString()->toMatch('/^Q[1-4]-\d{4}$/');
 
+    // Verify it defaults to current quarter
+    $currentQuarter = (int) ceil(now()->month / 3);
+    $currentYear = now()->year;
+    expect($selectedQuarter)->toBe("Q{$currentQuarter}-{$currentYear}");
+
     // Verify it's in the available quarters list
     $availableQuarters = $component->viewData('availableQuarters');
     expect($availableQuarters)->toContain($selectedQuarter);
+
+    // Verify current quarter is the first available option
+    expect($availableQuarters[0])->toBe($selectedQuarter);
 });
 
 it('can set squad capacity for a quarter', function () {
@@ -521,4 +529,398 @@ it('shows available epics that can be added to any selected squad', function () 
         ->and($availableEpics->first()->id)->toBe($partiallyPlannedEpic->id)
         ->and($availableEpics->first()->available_for_squad_ids)->toContain($squad2->id)
         ->and($availableEpics->first()->available_for_squad_ids)->not->toContain($squad1->id);
+});
+
+// Category Tests
+
+it('loads categories for the team', function () {
+    $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+
+    $component = Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id]);
+
+    $categories = $component->viewData('categories');
+
+    expect($categories)->toHaveCount(1)
+        ->and($categories->first()->name)->toBe('Growth');
+});
+
+it('groups planned epics by category', function () {
+    $category1 = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+    $category2 = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Tech']);
+
+    $epic1 = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->for($category1)
+        ->create(['title' => 'Growth Epic']);
+    $epic1->squads()->attach($this->squad, ['planned_quarter' => 'Q1-2026', 'story_points' => 20]);
+
+    $epic2 = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->for($category2)
+        ->create(['title' => 'Tech Epic']);
+    $epic2->squads()->attach($this->squad, ['planned_quarter' => 'Q1-2026', 'story_points' => 15]);
+
+    $component = Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id]);
+
+    $squadData = $component->viewData('squadData');
+    $plannedEpics = $squadData[$this->squad->id]['planned_epics'];
+
+    // Verify both epics are in planned epics
+    expect($plannedEpics)->toHaveCount(2);
+
+    // Verify category relationships are loaded
+    $growthEpic = $plannedEpics->firstWhere('title', 'Growth Epic');
+    $techEpic = $plannedEpics->firstWhere('title', 'Tech Epic');
+
+    expect($growthEpic->category_id)->toBe($category1->id)
+        ->and($techEpic->category_id)->toBe($category2->id);
+});
+
+it('calculates actual points by category', function () {
+    $category1 = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+    $category2 = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Tech']);
+
+    $epic1 = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->for($category1)
+        ->create();
+    $epic1->squads()->attach($this->squad, ['planned_quarter' => 'Q1-2026', 'story_points' => 25]);
+
+    $epic2 = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->for($category1)
+        ->create();
+    $epic2->squads()->attach($this->squad, ['planned_quarter' => 'Q1-2026', 'story_points' => 15]);
+
+    $epic3 = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->for($category2)
+        ->create();
+    $epic3->squads()->attach($this->squad, ['planned_quarter' => 'Q1-2026', 'story_points' => 30]);
+
+    $component = Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id]);
+
+    $squadData = $component->viewData('squadData');
+    $actualByCategory = $squadData[$this->squad->id]['actual_by_category'];
+
+    expect($actualByCategory[$category1->id])->toBe(40) // 25 + 15
+        ->and($actualByCategory[$category2->id])->toBe(30);
+});
+
+it('can set category targets for a quarter plan', function () {
+    $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->set('editingCapacityValues.'.$this->squad->id, 100)
+        ->call('saveCapacityForSquad', $this->squad->id)
+        ->call('saveCategoryTarget', $this->squad->id, $category->id, 50);
+
+    $quarterPlan = QuarterPlan::where('squad_id', $this->squad->id)
+        ->where('year', 2026)
+        ->where('quarter', 1)
+        ->first();
+
+    expect($quarterPlan)->not->toBeNull();
+
+    $categoryPivot = $quarterPlan->categories()->where('category_id', $category->id)->first();
+    expect($categoryPivot)->not->toBeNull()
+        ->and($categoryPivot->pivot->allocated_story_points)->toBe(50);
+});
+
+it('loads category targets when loading quarter plans', function () {
+    $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+
+    $quarterPlan = QuarterPlan::factory()
+        ->for($this->team)
+        ->for($this->squad)
+        ->create([
+            'year' => 2026,
+            'quarter' => 1,
+            'available_story_points' => 100,
+        ]);
+
+    $quarterPlan->categories()->attach($category->id, ['allocated_story_points' => 40]);
+
+    $component = Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id]);
+
+    $categoryTargets = $component->viewData('categoryTargets');
+
+    expect($categoryTargets[$this->squad->id][$category->id])->toBe(40);
+});
+
+it('can update epic from popover including title', function () {
+    $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+    $newStatus = Status::skip(1)->first();
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create([
+            'title' => 'Original Title',
+            'description' => 'Original description',
+        ]);
+    $epic->squads()->attach($this->squad, [
+        'planned_quarter' => 'Q1-2026',
+        'story_points' => 20,
+    ]);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('updateEpicFromPopover', $epic->id, $this->squad->id, 'New Title', 25, $newStatus->id, $category->id, 'New description');
+
+    $epic->refresh();
+
+    expect($epic->title)->toBe('New Title')
+        ->and($epic->description)->toBe('New description')
+        ->and($epic->status_id)->toBe($newStatus->id)
+        ->and($epic->category_id)->toBe($category->id);
+
+    // Check story points were updated on pivot
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'story_points' => 25,
+    ]);
+});
+
+it('can clear epic category via popover', function () {
+    $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->for($category)
+        ->create(['title' => 'Epic with category']);
+    $epic->squads()->attach($this->squad, [
+        'planned_quarter' => 'Q1-2026',
+        'story_points' => 20,
+    ]);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('updateEpicFromPopover', $epic->id, $this->squad->id, 'Epic with category', 20, $this->status->id, null, null);
+
+    $epic->refresh();
+
+    expect($epic->category_id)->toBeNull();
+});
+
+// Sort Handler Tests
+
+it('can sort epic within same category column', function () {
+    $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+
+    $epic1 = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->for($category)
+        ->create(['title' => 'Epic 1']);
+    $epic1->squads()->attach($this->squad, ['planned_quarter' => 'Q1-2026', 'story_points' => 10]);
+
+    $epic2 = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->for($category)
+        ->create(['title' => 'Epic 2']);
+    $epic2->squads()->attach($this->squad, ['planned_quarter' => 'Q1-2026', 'story_points' => 15]);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('sort', $epic2->id, 0, $category->id, $this->squad->id);
+
+    // Epic2 should now have sort_order 0
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic2->id,
+        'squad_id' => $this->squad->id,
+        'sort_order' => 0,
+    ]);
+});
+
+it('can move epic from backlog to category column', function () {
+    $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create([
+            'title' => 'Backlog Epic',
+            'start_date' => '2026-01-01',
+            'end_date' => '2026-03-31',
+        ]);
+    $epic->squads()->attach($this->squad); // Not planned yet
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('sort', $epic->id, 0, $category->id, $this->squad->id);
+
+    $epic->refresh();
+
+    // Epic should be assigned to category
+    expect($epic->category_id)->toBe($category->id);
+
+    // Epic should be planned for the quarter
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q1-2026',
+    ]);
+});
+
+it('can move epic between category columns', function () {
+    $category1 = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+    $category2 = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Tech']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->for($category1)
+        ->create(['title' => 'Epic to move']);
+    $epic->squads()->attach($this->squad, ['planned_quarter' => 'Q1-2026', 'story_points' => 20]);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('sort', $epic->id, 0, $category2->id, $this->squad->id);
+
+    $epic->refresh();
+
+    // Epic should now be in category2
+    expect($epic->category_id)->toBe($category2->id);
+
+    // Epic should still be planned for the quarter
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q1-2026',
+    ]);
+});
+
+it('can move epic from category column to backlog', function () {
+    $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->for($category)
+        ->create(['title' => 'Planned Epic']);
+    $epic->squads()->attach($this->squad, ['planned_quarter' => 'Q1-2026', 'story_points' => 20]);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('sort', $epic->id, 0, 'backlog', $this->squad->id);
+
+    // Epic should be removed from plan (planned_quarter = null)
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => null,
+        'sort_order' => null,
+    ]);
+
+    // Story points should be preserved
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'story_points' => 20,
+    ]);
+});
+
+it('can move epic to uncategorized column', function () {
+    $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->for($category)
+        ->create(['title' => 'Categorized Epic']);
+    $epic->squads()->attach($this->squad, ['planned_quarter' => 'Q1-2026', 'story_points' => 20]);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('sort', $epic->id, 0, 'uncategorized', $this->squad->id);
+
+    $epic->refresh();
+
+    // Epic should have no category
+    expect($epic->category_id)->toBeNull();
+
+    // Epic should still be planned
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q1-2026',
+    ]);
+});
+
+it('cannot sort epic from another team', function () {
+    $otherTeam = Team::factory()->create();
+    $category = \App\Models\Category::factory()->for($this->team)->create();
+
+    $otherEpic = Epic::factory()
+        ->for($otherTeam)
+        ->for($this->status)
+        ->create();
+    $otherEpic->squads()->attach($this->squad);
+
+    // This should silently fail (epic not found for team)
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('sort', $otherEpic->id, 0, $category->id, $this->squad->id);
+
+    // Epic should NOT be planned
+    $this->assertDatabaseMissing('epic_squad', [
+        'epic_id' => $otherEpic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q1-2026',
+    ]);
+});
+
+it('sort preserves existing story points when adding to plan', function () {
+    $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create([
+            'title' => 'Epic with points',
+            'start_date' => '2026-01-01',
+            'end_date' => '2026-03-31',
+        ]);
+    // Attach with existing story points but no planned_quarter
+    $epic->squads()->attach($this->squad, ['story_points' => 50]);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('sort', $epic->id, 0, $category->id, $this->squad->id);
+
+    // Story points should be preserved when adding to plan
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q1-2026',
+        'story_points' => 50,
+    ]);
 });

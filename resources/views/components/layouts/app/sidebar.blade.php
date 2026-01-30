@@ -21,6 +21,7 @@
             <flux:sidebar.item icon="map-pin" href="/roadmap" wire:navigate>Roadmap</flux:sidebar.item>
             <flux:sidebar.item icon="rectangle-stack" href="/epics" wire:navigate>Epics</flux:sidebar.item>
             <flux:sidebar.item icon="users" href="/squads" wire:navigate>Squads</flux:sidebar.item>
+            <flux:sidebar.item icon="tag" href="/categories" wire:navigate>Categories</flux:sidebar.item>
             <flux:sidebar.item icon="clipboard-document-list" href="/planning" wire:navigate>Planning</flux:sidebar.item>
         </flux:sidebar.nav>
 
@@ -96,8 +97,16 @@
         </flux:dropdown>
     </flux:header>
 
-    <flux:main class="">
+    <flux:main class="pb-8">
         {{ $slot }}
+
+        {{-- Minimal Footer --}}
+        <footer class="mt-12 pt-6 border-t border-zinc-200 dark:border-zinc-700">
+            <div class="flex items-center justify-between text-xs text-zinc-400">
+                <span>Project Roadmap</span>
+                <span>v1.0</span>
+            </div>
+        </footer>
     </flux:main>
 
     @fluxScripts

@@ -60,4 +60,9 @@ class Team extends JetstreamTeam
     {
         return $this->hasMany(QuarterPlan::class);
     }
+
+    public function categories(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(Category::class);
+    }
 }

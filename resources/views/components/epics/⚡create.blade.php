@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Category;
 use App\Models\Epic;
 use App\Models\Squad;
 use App\Models\Status;
@@ -19,6 +20,9 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     #[Validate('required|exists:statuses,id')]
     public string $status_id = '';
 
+    #[Validate('nullable|exists:categories,id')]
+    public string $category_id = '';
+
     #[Validate('required|in:low,medium,high,critical')]
     public string $priority = 'medium';
 
@@ -36,6 +40,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     public function mount(): void
     {
         $this->status_id = Status::where('slug', 'not-started')->first()?->id ?? '';
+        // Default to the team's default category
+        $this->category_id = Auth::user()->currentTeam->categories()->default()->first()?->id ?? '';
     }
 
     public function updatedSquadIds(): void
@@ -105,6 +111,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $epic = Epic::create([
             'team_id' => Auth::user()->currentTeam->id,
             'status_id' => $this->status_id,
+            'category_id' => $this->category_id ?: null,
             'priority' => $this->priority,
             'title' => $this->title,
             'description' => $this->description,
@@ -133,6 +140,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         return [
             'statuses' => Status::orderBy('order')->get(),
             'squads' => Auth::user()->currentTeam->squads()->orderBy('name')->get(),
+            'categories' => Auth::user()->currentTeam->categories()->ordered()->get(),
         ];
     }
 };
@@ -184,6 +192,18 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                             <flux:error name="priority" />
                         </flux:field>
                     </div>
+
+                    <flux:field>
+                        <flux:label>Category</flux:label>
+                        <flux:select wire:model="category_id">
+                            <option value="">Select a category</option>
+                            @foreach($categories as $category)
+                                <option value="{{ $category->id }}">{{ $category->name }}</option>
+                            @endforeach
+                        </flux:select>
+                        <flux:description>Categorize this epic by type of work</flux:description>
+                        <flux:error name="category_id" />
+                    </flux:field>
 
                     <div class="grid grid-cols-2 gap-4">
                         <flux:field>

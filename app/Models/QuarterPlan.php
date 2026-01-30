@@ -38,6 +38,13 @@ class QuarterPlan extends Model
         return $this->belongsTo(Squad::class);
     }
 
+    public function categories(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    {
+        return $this->belongsToMany(Category::class, 'quarter_plan_categories')
+            ->withPivot('allocated_story_points')
+            ->withTimestamps();
+    }
+
     public function getQuarterString(): string
     {
         return "Q{$this->quarter}-{$this->year}";

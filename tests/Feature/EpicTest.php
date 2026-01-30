@@ -710,3 +710,121 @@ it('can create an epic with squads without story points', function () {
     expect($epic->squads)->toHaveCount(1);
     expect($epic->squads->first()->pivot->story_points)->toBeNull();
 });
+
+// Category Tests
+
+it('can create an epic with a category', function () {
+    $user = User::factory()->withPersonalTeam()->create();
+    $squad = Squad::factory()->for($user->currentTeam)->create();
+    $category = \App\Models\Category::factory()->for($user->currentTeam)->create(['name' => 'Growth']);
+    $status = Status::where('slug', 'not-started')->first();
+
+    $this->actingAs($user);
+
+    Livewire::test('epics.create')
+        ->set('title', 'Epic With Category')
+        ->set('description', 'Testing category assignment')
+        ->set('status_id', $status->id)
+        ->set('category_id', (string) $category->id)
+        ->set('squad_ids', [$squad->id])
+        ->call('save')
+        ->assertRedirect('/epics');
+
+    $epic = Epic::where('title', 'Epic With Category')->first();
+    expect($epic)->not->toBeNull()
+        ->and($epic->category_id)->toBe($category->id)
+        ->and($epic->category->name)->toBe('Growth');
+});
+
+it('can update an epic category', function () {
+    $user = User::factory()->withPersonalTeam()->create();
+    $status = Status::first();
+    $squad = Squad::factory()->for($user->currentTeam)->create();
+    $category1 = \App\Models\Category::factory()->for($user->currentTeam)->create(['name' => 'Growth']);
+    $category2 = \App\Models\Category::factory()->for($user->currentTeam)->create(['name' => 'Tech']);
+
+    $epic = Epic::factory()
+        ->for($user->currentTeam)
+        ->for($status)
+        ->for($category1)
+        ->create();
+    $epic->squads()->attach($squad);
+
+    $this->actingAs($user);
+
+    Livewire::test('epics.edit', ['epic' => $epic])
+        ->assertSet('category_id', (string) $category1->id)
+        ->set('category_id', (string) $category2->id)
+        ->call('save')
+        ->assertRedirect('/epics');
+
+    $epic->refresh();
+    expect($epic->category_id)->toBe($category2->id);
+});
+
+it('can clear an epic category', function () {
+    $user = User::factory()->withPersonalTeam()->create();
+    $status = Status::first();
+    $squad = Squad::factory()->for($user->currentTeam)->create();
+    $category = \App\Models\Category::factory()->for($user->currentTeam)->create(['name' => 'Growth']);
+
+    $epic = Epic::factory()
+        ->for($user->currentTeam)
+        ->for($status)
+        ->for($category)
+        ->create();
+    $epic->squads()->attach($squad);
+
+    $this->actingAs($user);
+
+    Livewire::test('epics.edit', ['epic' => $epic])
+        ->assertSet('category_id', (string) $category->id)
+        ->set('category_id', '')
+        ->call('save')
+        ->assertRedirect('/epics');
+
+    $epic->refresh();
+    expect($epic->category_id)->toBeNull();
+});
+
+it('shows warning when category is modified', function () {
+    $user = User::factory()->withPersonalTeam()->create();
+    $status = Status::first();
+    $category1 = \App\Models\Category::factory()->for($user->currentTeam)->create(['name' => 'Growth']);
+    $category2 = \App\Models\Category::factory()->for($user->currentTeam)->create(['name' => 'Tech']);
+
+    $epic = Epic::factory()
+        ->for($user->currentTeam)
+        ->for($status)
+        ->for($category1)
+        ->create();
+
+    $this->actingAs($user);
+
+    Livewire::test('epics.edit', ['epic' => $epic])
+        ->assertDontSee('You have unsaved changes')
+        ->set('category_id', (string) $category2->id)
+        ->assertSee('You have unsaved changes');
+});
+
+it('can discard category changes', function () {
+    $user = User::factory()->withPersonalTeam()->create();
+    $status = Status::first();
+    $category1 = \App\Models\Category::factory()->for($user->currentTeam)->create(['name' => 'Growth']);
+    $category2 = \App\Models\Category::factory()->for($user->currentTeam)->create(['name' => 'Tech']);
+
+    $epic = Epic::factory()
+        ->for($user->currentTeam)
+        ->for($status)
+        ->for($category1)
+        ->create();
+
+    $this->actingAs($user);
+
+    Livewire::test('epics.edit', ['epic' => $epic])
+        ->set('category_id', (string) $category2->id)
+        ->assertSee('You have unsaved changes')
+        ->call('discardChanges')
+        ->assertSet('category_id', (string) $category1->id)
+        ->assertDontSee('You have unsaved changes');
+});

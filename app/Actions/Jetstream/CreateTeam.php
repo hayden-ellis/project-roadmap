@@ -2,6 +2,7 @@
 
 namespace App\Actions\Jetstream;
 
+use App\Models\Category;
 use App\Models\Team;
 use App\Models\User;
 use Illuminate\Support\Facades\Gate;
@@ -31,6 +32,16 @@ class CreateTeam implements CreatesTeams
             'name' => $input['name'],
             'personal_team' => false,
         ]));
+
+        // Create the default "General" category for the new team
+        Category::create([
+            'team_id' => $team->id,
+            'name' => 'General',
+            'color' => '#6B7280',
+            'description' => 'Default category for uncategorized work',
+            'sort_order' => 0,
+            'is_default' => true,
+        ]);
 
         return $team;
     }

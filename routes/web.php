@@ -28,6 +28,10 @@ Route::middleware([
     Route::livewire('/squads/create', 'squads.create')->name('squads.create');
     Route::livewire('/squads/{squad}/edit', 'squads.edit')->name('squads.edit');
 
+    Route::livewire('/categories', 'categories.index')->name('categories.index');
+    Route::livewire('/categories/create', 'categories.create')->name('categories.create');
+    Route::livewire('/categories/{category}/edit', 'categories.edit')->name('categories.edit');
+
     Route::livewire('/epics', 'epics.index')->name('epics.index');
     Route::livewire('/epics/create', 'epics.create')->name('epics.create');
     Route::livewire('/epics/{epic}/edit', 'epics.edit')->name('epics.edit');
