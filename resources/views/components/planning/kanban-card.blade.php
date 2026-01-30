@@ -18,73 +18,71 @@
     wire:key="{{ $planned ? 'planned' : 'backlog' }}-{{ $epic->id }}"
     wire:transition
     {{ $attributes->class([
-        'group p-3 bg-white dark:bg-zinc-900 rounded-lg shadow-sm hover:shadow-md cursor-grab active:cursor-grabbing',
+        'group relative p-3 bg-white dark:bg-zinc-900 rounded-lg shadow-sm hover:shadow-md cursor-grab active:cursor-grabbing',
         'border',
         $borderColor,
     ]) }}
 >
-    <div class="flex items-start justify-between gap-2">
-        <div class="flex-1 min-w-0">
-            @if($planned && $statuses && $categories)
-            {{-- Planned: clickable title opens modal --}}
-            <flux:button
-                variant="ghost"
-                size="sm"
-                class="-ml-2 font-medium text-sm text-left truncate max-w-full"
-                x-on:click.stop="$dispatch('modal-show', { name: 'edit-epic-{{ $epic->id }}' })"
-            >
-                <span class="truncate">{{ $epic->title }}</span>
-                <flux:icon.pencil-square variant="micro" class="ml-1 opacity-0 group-hover:opacity-50 shrink-0" />
-            </flux:button>
-            <x-planning.epic-modal
-                :epic="$epic"
-                :squadId="$squadId"
-                :storyPoints="$storyPoints"
-                :statuses="$statuses"
-                :categories="$categories"
-                :quarter="$quarter"
-                :squadName="$squadName"
-            />
-            @else
-            {{-- Backlog: plain title --}}
-            <flux:text class="font-medium text-sm truncate">{{ $epic->title }}</flux:text>
-            @endif
+    {{-- Actions (absolute positioned) --}}
+    <div class="absolute top-1 right-1 opacity-0 group-hover:opacity-100">
+        @if($planned)
+        <flux:button
+            variant="ghost"
+            size="xs"
+            icon="x-mark"
+            wire:click="removeEpicFromPlan({{ $epic->id }}, {{ $squadId }})"
+            class="text-red-500"
+        />
+        @else
+        <flux:button
+            variant="primary"
+            size="xs"
+            icon="plus"
+            wire:click="addEpicToPlan({{ $epic->id }}, [{{ $squadId }}])"
+        >
+            Add
+        </flux:button>
+        @endif
+    </div>
 
-            <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
-                <x-planning.status-badge :status="$epic->status" />
+    @if($planned && $statuses && $categories)
+    {{-- Planned: clickable title opens modal --}}
+    <flux:button
+        variant="ghost"
+        size="sm"
+        class="-ml-3 font-medium text-sm text-left truncate max-w-full"
+        x-on:click.stop="$dispatch('modal-show', { name: 'edit-epic-{{ $epic->id }}' })"
+    >
+        <span class="truncate">{{ $epic->title }}</span>
+        <flux:icon.pencil-square variant="micro" class="ml-1 opacity-0 group-hover:opacity-50 shrink-0" />
+    </flux:button>
+    <x-planning.epic-modal
+        :epic="$epic"
+        :squadId="$squadId"
+        :storyPoints="$storyPoints"
+        :statuses="$statuses"
+        :categories="$categories"
+        :quarter="$quarter"
+        :squadName="$squadName"
+    />
+    @else
+    {{-- Backlog: plain title --}}
+    <flux:text class="font-medium text-sm truncate">{{ $epic->title }}</flux:text>
+    @endif
 
-                @if($epic->category)
-                <x-planning.category-badge :category="$epic->category" />
-                @endif
+    <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400 line-clamp-1 h-4">{{ $epic->description ?: '' }}</p>
 
-                @if($storyPoints && !$planned)
-                <flux:badge color="blue" size="sm">{{ $storyPoints }} pts</flux:badge>
-                @endif
-            </div>
-        </div>
+    <div class="flex items-center justify-between gap-1.5 mt-2">
+        <div class="flex flex-wrap items-center gap-1.5">
+            <x-planning.status-badge :status="$epic->status" />
 
-        {{-- Actions --}}
-        <div class="flex items-center gap-2 shrink-0">
-            @if($planned)
-            <flux:badge color="blue" size="sm">{{ $storyPoints }} pts</flux:badge>
-            <flux:button
-                variant="ghost"
-                size="xs"
-                icon="x-mark"
-                wire:click="removeEpicFromPlan({{ $epic->id }}, {{ $squadId }})"
-                class="text-red-500 opacity-0 group-hover:opacity-100"
-            />
-            @else
-            <flux:button
-                variant="primary"
-                size="xs"
-                icon="plus"
-                wire:click="addEpicToPlan({{ $epic->id }}, [{{ $squadId }}])"
-                class="shrink-0 opacity-0 group-hover:opacity-100"
-            >
-                Add
-            </flux:button>
+            @if($epic->category)
+            <x-planning.category-badge :category="$epic->category" />
             @endif
         </div>
+
+        @if($storyPoints)
+        <flux:badge color="blue" size="sm">{{ $storyPoints }} pts</flux:badge>
+        @endif
     </div>
 </div>
