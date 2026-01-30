@@ -389,33 +389,20 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $selectedQuarter = $this->selectedQuarter;
         $selectedSquadIds = $this->selectedSquadIds;
 
-        // Get epic IDs that are planned for 2+ selected squads (subquery for filtering)
-        $sharedEpicIds = DB::table('epic_quarter_plans')
-            ->whereIn('squad_id', $selectedSquadIds)
-            ->where('quarter', $selectedQuarter)
-            ->groupBy('epic_id')
-            ->havingRaw('COUNT(DISTINCT squad_id) >= 2')
-            ->pluck('epic_id');
-
-        if ($sharedEpicIds->isEmpty()) {
-            return collect();
-        }
-
         // Get epics planned for 2+ of the selected squads
         return $team->epics()
-            ->with([
-                'status',
-                'squads',
-                'category',
-                // Only load quarter plans for the selected squads and quarter
-                'quarterPlans' => fn ($q) => $q->whereIn('squad_id', $selectedSquadIds)
-                    ->where('quarter', $selectedQuarter),
-            ])
-            ->whereIn('id', $sharedEpicIds)
+            ->with(['status', 'squads', 'category', 'quarterPlans'])
             ->get()
-            ->map(function ($epic) {
+            ->filter(function ($epic) use ($selectedSquadIds, $selectedQuarter) {
+                $plannedCount = $epic->quarterPlans
+                    ->whereIn('squad_id', $selectedSquadIds)
+                    ->where('quarter', $selectedQuarter)
+                    ->count();
+                return $plannedCount >= 2;
+            })
+            ->map(function ($epic) use ($selectedSquadIds, $selectedQuarter) {
                 $squadStoryPoints = [];
-                foreach ($epic->quarterPlans as $plan) {
+                foreach ($epic->quarterPlans->whereIn('squad_id', $selectedSquadIds)->where('quarter', $selectedQuarter) as $plan) {
                     $squadStoryPoints[$plan->squad_id] = $plan->story_points;
                 }
                 $epic->setAttribute('squad_story_points', $squadStoryPoints);
@@ -434,26 +421,24 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $otherSquadIds = array_values(array_diff($this->selectedSquadIds, [$squadId]));
 
         return $team->epics()
-            ->with([
-                'status',
-                'squads',
-                'category',
-                // Only load the relevant quarter plan
-                'quarterPlans' => fn ($q) => $q->where('squad_id', $squadId)
-                    ->where('quarter', $selectedQuarter),
-            ])
+            ->with(['status', 'squads', 'category', 'quarterPlans'])
             ->whereHas('quarterPlans', function ($q) use ($squadId, $selectedQuarter) {
                 $q->where('squad_id', $squadId)
                     ->where('quarter', $selectedQuarter);
             })
-            // Filter out epics planned for any other selected squad (in DB)
-            ->whereDoesntHave('quarterPlans', function ($q) use ($otherSquadIds, $selectedQuarter) {
-                $q->whereIn('squad_id', $otherSquadIds)
-                    ->where('quarter', $selectedQuarter);
-            })
             ->get()
-            ->map(function ($epic) {
-                $quarterPlan = $epic->quarterPlans->first();
+            ->filter(function ($epic) use ($otherSquadIds, $selectedQuarter) {
+                // Filter out epics planned for any other selected squad
+                return ! $epic->quarterPlans
+                    ->whereIn('squad_id', $otherSquadIds)
+                    ->where('quarter', $selectedQuarter)
+                    ->isNotEmpty();
+            })
+            ->map(function ($epic) use ($squadId, $selectedQuarter) {
+                $quarterPlan = $epic->quarterPlans
+                    ->where('squad_id', $squadId)
+                    ->where('quarter', $selectedQuarter)
+                    ->first();
                 $epic->planned_story_points = $quarterPlan->story_points ?? null;
 
                 return $epic;
@@ -473,15 +458,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
         // Get epics assigned to any selected squad
         return $team->epics()
-            ->with([
-                'status',
-                'category',
-                // Only load squads that are in selectedSquadIds
-                'squads' => fn ($q) => $q->whereIn('squads.id', $selectedSquadIds),
-                // Only load quarter plans for selected squads in this quarter
-                'quarterPlans' => fn ($q) => $q->whereIn('squad_id', $selectedSquadIds)
-                    ->where('quarter', $selectedQuarter),
-            ])
+            ->with(['status', 'squads', 'category', 'quarterPlans'])
             ->whereHas('squads', function ($q) use ($selectedSquadIds) {
                 $q->whereIn('squads.id', $selectedSquadIds);
             })
@@ -498,12 +475,16 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 });
             })
             ->get()
-            ->map(function ($epic) {
-                // Track which selected squads the epic is assigned to (from constrained eager load)
-                $epic->assigned_squad_ids = $epic->squads->pluck('id')->toArray();
+            ->map(function ($epic) use ($selectedSquadIds, $selectedQuarter) {
+                // Track which selected squads the epic is assigned to
+                $epic->assigned_squad_ids = $epic->squads->whereIn('id', $selectedSquadIds)->pluck('id')->toArray();
 
-                // Track which squads already have it planned (from constrained eager load)
-                $epic->planned_for_squad_ids = $epic->quarterPlans->pluck('squad_id')->toArray();
+                // Track which squads already have it planned (via quarter plans)
+                $epic->planned_for_squad_ids = $epic->quarterPlans
+                    ->whereIn('squad_id', $selectedSquadIds)
+                    ->where('quarter', $selectedQuarter)
+                    ->pluck('squad_id')
+                    ->toArray();
 
                 // Track which squads can still add it
                 $epic->available_for_squad_ids = array_values(array_diff($epic->assigned_squad_ids, $epic->planned_for_squad_ids));
