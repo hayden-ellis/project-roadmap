@@ -21,13 +21,13 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             ->get()
             ->map(function ($plan) use ($team) {
                 // Calculate allocated points for this plan
-                $allocatedPoints = (int) DB::table('epic_squad')
-                    ->join('epics', 'epic_squad.epic_id', '=', 'epics.id')
-                    ->where('epic_squad.squad_id', $plan->squad_id)
-                    ->where('epic_squad.planned_quarter', $plan->getQuarterString())
-                    ->whereNotNull('epic_squad.story_points')
+                $allocatedPoints = (int) DB::table('epic_quarter_plans')
+                    ->join('epics', 'epic_quarter_plans.epic_id', '=', 'epics.id')
+                    ->where('epic_quarter_plans.squad_id', $plan->squad_id)
+                    ->where('epic_quarter_plans.quarter', $plan->getQuarterString())
+                    ->whereNotNull('epic_quarter_plans.story_points')
                     ->where('epics.team_id', $team->id)
-                    ->sum('epic_squad.story_points');
+                    ->sum('epic_quarter_plans.story_points');
 
                 return [
                     'plan' => $plan,
