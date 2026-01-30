@@ -12,22 +12,29 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     {
         $team = Auth::user()->currentTeam;
 
-        // Get all quarter plans for this team, grouped by quarter
-        $plans = QuarterPlan::where('team_id', $team->id)
+        // Get all quarter plans for this team
+        $quarterPlans = QuarterPlan::where('team_id', $team->id)
             ->with(['squad'])
             ->orderBy('year', 'desc')
             ->orderBy('quarter', 'desc')
             ->orderBy('squad_id')
+            ->get();
+
+        // Batch query: Get allocated points for all plans at once (1 query instead of N)
+        $allocations = DB::table('epic_quarter_plans')
+            ->join('epics', 'epic_quarter_plans.epic_id', '=', 'epics.id')
+            ->where('epics.team_id', $team->id)
+            ->whereNotNull('epic_quarter_plans.story_points')
+            ->groupBy('epic_quarter_plans.squad_id', 'epic_quarter_plans.quarter')
+            ->selectRaw('epic_quarter_plans.squad_id, epic_quarter_plans.quarter, SUM(epic_quarter_plans.story_points) as total')
             ->get()
-            ->map(function ($plan) use ($team) {
-                // Calculate allocated points for this plan
-                $allocatedPoints = (int) DB::table('epic_quarter_plans')
-                    ->join('epics', 'epic_quarter_plans.epic_id', '=', 'epics.id')
-                    ->where('epic_quarter_plans.squad_id', $plan->squad_id)
-                    ->where('epic_quarter_plans.quarter', $plan->getQuarterString())
-                    ->whereNotNull('epic_quarter_plans.story_points')
-                    ->where('epics.team_id', $team->id)
-                    ->sum('epic_quarter_plans.story_points');
+            ->keyBy(fn ($row) => "{$row->squad_id}-{$row->quarter}");
+
+        // Map plans with pre-fetched allocations
+        $plans = $quarterPlans
+            ->map(function ($plan) use ($allocations) {
+                $key = "{$plan->squad_id}-{$plan->getQuarterString()}";
+                $allocatedPoints = (int) ($allocations[$key]->total ?? 0);
 
                 return [
                     'plan' => $plan,
