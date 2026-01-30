@@ -1195,3 +1195,122 @@ it('updateEpicFromPopover updates story points for correct quarter only', functi
         'story_points' => 30,
     ]);
 });
+
+it('epic disappears from backlog after being added to plan via sort', function () {
+    // Epic is in backlog (has squad pivot but not for this quarter)
+    // Dates must overlap Q1-2026 (Jan 1 - Mar 31) to appear in backlog
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create([
+            'start_date' => '2026-01-15',
+            'end_date' => '2026-03-15',
+        ]);
+
+    // Epic is planned in Q4-2025 but NOT in Q1-2026
+    \App\Models\EpicSquad::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q4-2025',
+        'story_points' => 20,
+    ]);
+
+    $component = Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id]);
+
+    // Verify epic is in backlog initially
+    $squadData = $component->viewData('squadData');
+    $backlogEpics = $squadData[$this->squad->id]['backlog_epics'];
+    expect($backlogEpics->pluck('id')->toArray())->toContain($epic->id);
+
+    // Drag from backlog to planned (category column)
+    $component->call('sort', $epic->id, 0, 'uncategorized', $this->squad->id);
+
+    // Re-fetch view data after sort
+    $squadData = $component->viewData('squadData');
+    $backlogEpics = $squadData[$this->squad->id]['backlog_epics'];
+    $plannedEpics = $squadData[$this->squad->id]['planned_epics'];
+
+    // Epic should NOT be in backlog anymore
+    expect($backlogEpics->pluck('id')->toArray())->not->toContain($epic->id);
+
+    // Epic should be in planned
+    expect($plannedEpics->pluck('id')->toArray())->toContain($epic->id);
+
+    // Both quarter pivots should exist
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q4-2025',
+        'story_points' => 20,
+    ]);
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q1-2026',
+    ]);
+});
+
+it('epic removed from plan stays in backlog if has other quarter pivot', function () {
+    // Dates must overlap Q1-2026 (Jan 1 - Mar 31) to appear in backlog
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create([
+            'start_date' => '2026-01-15',
+            'end_date' => '2026-03-15',
+        ]);
+
+    // Epic is planned in BOTH Q4-2025 and Q1-2026
+    \App\Models\EpicSquad::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q4-2025',
+        'story_points' => 20,
+    ]);
+    \App\Models\EpicSquad::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q1-2026',
+        'story_points' => 15,
+    ]);
+
+    $component = Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id]);
+
+    // Verify epic is in planned initially
+    $squadData = $component->viewData('squadData');
+    $plannedEpics = $squadData[$this->squad->id]['planned_epics'];
+    expect($plannedEpics->pluck('id')->toArray())->toContain($epic->id);
+
+    // Remove from Q1-2026 plan (drag to backlog)
+    $component->call('sort', $epic->id, 0, 'backlog', $this->squad->id);
+
+    // Re-fetch view data
+    $squadData = $component->viewData('squadData');
+    $backlogEpics = $squadData[$this->squad->id]['backlog_epics'];
+    $plannedEpics = $squadData[$this->squad->id]['planned_epics'];
+
+    // Epic should be in backlog now (still has Q4-2025 pivot, so still assigned to squad)
+    expect($backlogEpics->pluck('id')->toArray())->toContain($epic->id);
+
+    // Epic should NOT be in planned anymore for Q1-2026
+    expect($plannedEpics->pluck('id')->toArray())->not->toContain($epic->id);
+
+    // Q1-2026 pivot should be deleted
+    $this->assertDatabaseMissing('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q1-2026',
+    ]);
+
+    // Q4-2025 pivot should still exist
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q4-2025',
+        'story_points' => 20,
+    ]);
+});

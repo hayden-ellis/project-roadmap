@@ -286,12 +286,19 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             ->get()
             ->filter(function ($epic) use ($squadId, $selectedQuarter) {
                 // Filter out epics that are already planned for this squad in this quarter
-                $squadPivot = $epic->squads->firstWhere('id', $squadId)?->pivot;
-                return ! $squadPivot || $squadPivot->planned_quarter !== $selectedQuarter;
+                // With multi-quarter support, an epic can have multiple pivots for the same squad
+                // so we need to check if ANY pivot matches this squad+quarter
+                $hasPlannedPivot = $epic->squads
+                    ->where('id', $squadId)
+                    ->contains(fn($squad) => $squad->pivot->planned_quarter === $selectedQuarter);
+                return ! $hasPlannedPivot;
             })
-            ->map(function ($epic) use ($squadId) {
-                $pivot = $epic->squads->firstWhere('id', $squadId)?->pivot;
-                $epic->existing_story_points = $pivot->story_points ?? null;
+            ->map(function ($epic) use ($squadId, $selectedQuarter) {
+                // Get story points from any existing pivot for this squad (prefer current quarter, then any)
+                $pivots = $epic->squads->where('id', $squadId);
+                $currentQuarterPivot = $pivots->first(fn($s) => $s->pivot->planned_quarter === $selectedQuarter);
+                $anyPivot = $pivots->first();
+                $epic->existing_story_points = $currentQuarterPivot?->pivot->story_points ?? $anyPivot?->pivot->story_points ?? null;
                 return $epic;
             })
             ->values();
