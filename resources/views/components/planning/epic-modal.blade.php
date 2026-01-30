@@ -1,4 +1,4 @@
-@props(['epic', 'squadId', 'storyPoints', 'statuses', 'categories'])
+@props(['epic', 'squadId', 'storyPoints', 'statuses', 'categories', 'quarter', 'squadName'])
 
 <flux:modal name="edit-epic-{{ $epic->id }}" class="w-full max-w-lg">
     <div class="space-y-6" x-data="{
@@ -30,6 +30,10 @@
         {{-- Header --}}
         <div>
             <flux:heading size="lg">Edit Epic</flux:heading>
+            <div class="flex items-center gap-2 mt-1">
+                <flux:badge color="blue" size="sm">{{ $quarter }}</flux:badge>
+                <flux:badge color="zinc" size="sm">{{ $squadName }}</flux:badge>
+            </div>
             @if($epic->start_date && $epic->end_date)
             <flux:text class="text-sm text-zinc-500 mt-1">
                 {{ $epic->start_date->format('M j') }} - {{ $epic->end_date->format('M j, Y') }}
@@ -66,7 +70,8 @@
 
         {{-- Story Points --}}
         <flux:field>
-            <flux:label>Story Points (this squad)</flux:label>
+            <flux:label>Story Points for {{ $quarter }}</flux:label>
+            <flux:description>Points allocated for {{ $squadName }} this quarter only</flux:description>
             <flux:input type="number" x-model="storyPoints" @change="saveData()" placeholder="e.g., 21" min="0" />
         </flux:field>
 
@@ -77,15 +82,28 @@
         </flux:field>
 
         {{-- Other squads indicator --}}
-        @if($epic->squads->count() > 1)
+        @php
+            // Deduplicate squads and sum story points across all quarters
+            $uniqueSquads = $epic->squads->groupBy('id')->map(function ($squadRecords) {
+                $squad = $squadRecords->first();
+                $totalPoints = $squadRecords->sum('pivot.story_points');
+                return (object) [
+                    'id' => $squad->id,
+                    'name' => $squad->name,
+                    'color' => $squad->color,
+                    'total_story_points' => $totalPoints,
+                ];
+            });
+        @endphp
+        @if($uniqueSquads->count() > 1)
         <div class="flex flex-wrap gap-2 items-center">
             <flux:text class="text-xs text-zinc-500 font-medium uppercase tracking-wide">All Squads:</flux:text>
-            @foreach($epic->squads as $squad)
+            @foreach($uniqueSquads as $squad)
             <span class="inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs" style="background-color: {{ $squad->color }}20; color: {{ $squad->color }}">
                 <div class="h-1.5 w-1.5 rounded-full" style="background-color: {{ $squad->color }}"></div>
                 {{ $squad->name }}
-                @if($squad->pivot->story_points)
-                    ({{ $squad->pivot->story_points }} pts)
+                @if($squad->total_story_points)
+                    ({{ $squad->total_story_points }} pts total)
                 @endif
             </span>
             @endforeach

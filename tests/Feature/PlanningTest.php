@@ -139,12 +139,11 @@ it('can remove epic from plan', function () {
         ->set('selectedSquadIds', [$this->squad->id])
         ->call('removeEpicFromPlan', $epic->id, $this->squad->id);
 
-    // Story points should be preserved when removing from plan
-    $this->assertDatabaseHas('epic_squad', [
+    // Pivot record for this quarter should be deleted
+    $this->assertDatabaseMissing('epic_squad', [
         'epic_id' => $epic->id,
         'squad_id' => $this->squad->id,
-        'planned_quarter' => null,
-        'story_points' => 20, // Points are preserved
+        'planned_quarter' => 'Q1-2026',
     ]);
 });
 
@@ -829,19 +828,11 @@ it('can move epic from category column to backlog', function () {
         ->set('selectedSquadIds', [$this->squad->id])
         ->call('sort', $epic->id, 0, 'backlog', $this->squad->id);
 
-    // Epic should be removed from plan (planned_quarter = null)
-    $this->assertDatabaseHas('epic_squad', [
+    // Pivot record for this quarter should be deleted
+    $this->assertDatabaseMissing('epic_squad', [
         'epic_id' => $epic->id,
         'squad_id' => $this->squad->id,
-        'planned_quarter' => null,
-        'sort_order' => null,
-    ]);
-
-    // Story points should be preserved
-    $this->assertDatabaseHas('epic_squad', [
-        'epic_id' => $epic->id,
-        'squad_id' => $this->squad->id,
-        'story_points' => 20,
+        'planned_quarter' => 'Q1-2026',
     ]);
 });
 
@@ -897,7 +888,7 @@ it('cannot sort epic from another team', function () {
     ]);
 });
 
-it('sort preserves existing story points when adding to plan', function () {
+it('sort creates new quarter entry with null story points', function () {
     $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
 
     $epic = Epic::factory()
@@ -908,19 +899,299 @@ it('sort preserves existing story points when adding to plan', function () {
             'start_date' => '2026-01-01',
             'end_date' => '2026-03-31',
         ]);
-    // Attach with existing story points but no planned_quarter
-    $epic->squads()->attach($this->squad, ['story_points' => 50]);
+    // Attach with existing story points but no planned_quarter (backlog)
+    $epic->squads()->attach($this->squad, ['story_points' => 50, 'planned_quarter' => null]);
 
     Livewire::test('planning.show', ['plan' => null])
         ->set('selectedQuarter', 'Q1-2026')
         ->set('selectedSquadIds', [$this->squad->id])
         ->call('sort', $epic->id, 0, $category->id, $this->squad->id);
 
-    // Story points should be preserved when adding to plan
+    // New quarter entry should have null story points (fresh estimate)
     $this->assertDatabaseHas('epic_squad', [
         'epic_id' => $epic->id,
         'squad_id' => $this->squad->id,
         'planned_quarter' => 'Q1-2026',
-        'story_points' => 50,
+        'story_points' => null,
+    ]);
+});
+
+// Multi-Quarter Epic Tests
+
+it('epic can exist in multiple quarters with independent story points', function () {
+    $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->for($category)
+        ->create(['title' => 'Carryover Epic']);
+
+    // Add to Q4-2025 with 30 points
+    $epic->squads()->attach($this->squad, ['planned_quarter' => 'Q4-2025', 'story_points' => 30]);
+
+    // Add to Q1-2026 via sort (simulating drag from backlog)
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('sort', $epic->id, 0, $category->id, $this->squad->id);
+
+    // Both quarter entries should exist
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q4-2025',
+        'story_points' => 30,
+    ]);
+
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q1-2026',
+        'story_points' => null,  // Fresh estimate for new quarter
+    ]);
+});
+
+it('removing epic from one quarter does not affect other quarters', function () {
+    $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->for($category)
+        ->create(['title' => 'Multi-Quarter Epic']);
+
+    // Epic is planned in both Q4-2025 and Q1-2026
+    \App\Models\EpicSquad::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q4-2025',
+        'story_points' => 30,
+    ]);
+    \App\Models\EpicSquad::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q1-2026',
+        'story_points' => 12,
+    ]);
+
+    // Remove from Q1-2026
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('removeEpicFromPlan', $epic->id, $this->squad->id);
+
+    // Q1-2026 entry should be deleted
+    $this->assertDatabaseMissing('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q1-2026',
+    ]);
+
+    // Q4-2025 entry should still exist with original points
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q4-2025',
+        'story_points' => 30,
+    ]);
+});
+
+it('updating story points in one quarter does not affect other quarters', function () {
+    $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->for($category)
+        ->create(['title' => 'Multi-Quarter Epic']);
+
+    // Epic is planned in both quarters
+    \App\Models\EpicSquad::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q4-2025',
+        'story_points' => 30,
+    ]);
+    \App\Models\EpicSquad::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q1-2026',
+        'story_points' => 12,
+    ]);
+
+    // Update Q1-2026 story points
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('updateEpicStoryPoints', $epic->id, $this->squad->id, 15);
+
+    // Q1-2026 should be updated
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q1-2026',
+        'story_points' => 15,
+    ]);
+
+    // Q4-2025 should be unchanged
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q4-2025',
+        'story_points' => 30,
+    ]);
+});
+
+it('capacity calculations are independent per quarter', function () {
+    $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->for($category)
+        ->create(['title' => 'Multi-Quarter Epic']);
+
+    // Epic has 30 pts in Q4-2025, 12 pts in Q1-2026
+    \App\Models\EpicSquad::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q4-2025',
+        'story_points' => 30,
+    ]);
+    \App\Models\EpicSquad::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q1-2026',
+        'story_points' => 12,
+    ]);
+
+    // Check Q1-2026 shows only 12 pts
+    $component = Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id]);
+
+    $squadData = $component->viewData('squadData');
+    expect($squadData[$this->squad->id]['allocated'])->toBe(12);
+});
+
+it('epic shows in backlog if not planned for current quarter but planned for another', function () {
+    $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->for($category)
+        ->create([
+            'title' => 'Q4 Only Epic',
+            'start_date' => '2025-10-01',
+            'end_date' => '2026-03-31',
+        ]);
+
+    // Epic is only planned for Q4-2025
+    \App\Models\EpicSquad::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q4-2025',
+        'story_points' => 30,
+    ]);
+
+    // When viewing Q1-2026, epic should appear in backlog
+    $component = Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id]);
+
+    $squadData = $component->viewData('squadData');
+    $backlogEpics = $squadData[$this->squad->id]['backlog_epics'];
+
+    expect($backlogEpics->pluck('id')->toArray())->toContain($epic->id);
+});
+
+it('can clear story points to null via inline update', function () {
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create();
+    $epic->squads()->attach($this->squad, [
+        'planned_quarter' => 'Q1-2026',
+        'story_points' => 20,
+    ]);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('updateEpicStoryPoints', $epic->id, $this->squad->id, null);
+
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q1-2026',
+        'story_points' => null,
+    ]);
+});
+
+it('can clear story points to null via popover using empty string', function () {
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create(['title' => 'Test Epic']);
+    $epic->squads()->attach($this->squad, [
+        'planned_quarter' => 'Q1-2026',
+        'story_points' => 20,
+    ]);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('updateEpicFromPopover', $epic->id, $this->squad->id, 'Test Epic', '', $this->status->id, null, null);
+
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q1-2026',
+        'story_points' => null,
+    ]);
+});
+
+it('updateEpicFromPopover updates story points for correct quarter only', function () {
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create(['title' => 'Multi-Quarter Epic']);
+
+    // Epic exists in both Q4-2025 and Q1-2026
+    \App\Models\EpicSquad::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q4-2025',
+        'story_points' => 30,
+    ]);
+    \App\Models\EpicSquad::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q1-2026',
+        'story_points' => 12,
+    ]);
+
+    // Update via popover while viewing Q1-2026
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('updateEpicFromPopover', $epic->id, $this->squad->id, 'Multi-Quarter Epic', 18, $this->status->id, null, null);
+
+    // Q1-2026 should be updated
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q1-2026',
+        'story_points' => 18,
+    ]);
+
+    // Q4-2025 should be unchanged
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'planned_quarter' => 'Q4-2025',
+        'story_points' => 30,
     ]);
 });

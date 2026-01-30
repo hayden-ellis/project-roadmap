@@ -467,10 +467,11 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         // Convert to int or null
         $storyPoints = $storyPoints !== '' && $storyPoints !== null ? (int) $storyPoints : null;
 
-        $epic->squads()->updateExistingPivot($squadId, [
-            'story_points' => $storyPoints,
-            'planned_quarter' => $this->selectedQuarter,
-        ]);
+        // Update the pivot for this specific quarter
+        EpicSquad::where('epic_id', $epicId)
+            ->where('squad_id', $squadId)
+            ->where('planned_quarter', $this->selectedQuarter)
+            ->update(['story_points' => $storyPoints]);
     }
 
     #[\Livewire\Attributes\Renderless]
@@ -487,12 +488,13 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             'description' => $description ?: null,
         ]);
 
-        // Update story points on the pivot if squad is in selected squads
+        // Update story points on the pivot for this specific quarter
         if (in_array($squadId, $this->selectedSquadIds)) {
             $storyPoints = $storyPoints !== '' && $storyPoints !== null ? (int) $storyPoints : null;
-            $epic->squads()->updateExistingPivot($squadId, [
-                'story_points' => $storyPoints,
-            ]);
+            EpicSquad::where('epic_id', $epicId)
+                ->where('squad_id', $squadId)
+                ->where('planned_quarter', $this->selectedQuarter)
+                ->update(['story_points' => $storyPoints]);
         }
     }
 
@@ -505,10 +507,11 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $epic = Epic::findOrFail($epicId);
         $this->authorizeEpic($epic);
 
-        $epic->squads()->updateExistingPivot($squadId, [
-            'planned_quarter' => null,
-            'sort_order' => null,
-        ]);
+        // Delete the pivot record for this specific quarter only
+        EpicSquad::where('epic_id', $epicId)
+            ->where('squad_id', $squadId)
+            ->where('planned_quarter', $this->selectedQuarter)
+            ->delete();
     }
 
     public function toggleCapacity(): void
@@ -532,17 +535,16 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             return;
         }
 
+        // Find existing pivot for THIS quarter
         $epicSquad = EpicSquad::where('epic_id', $epicId)
             ->where('squad_id', $squadId)
+            ->where('planned_quarter', $this->selectedQuarter)
             ->first();
 
         if ($column === 'backlog') {
-            // Remove from plan
+            // Remove from plan - delete the pivot record for this quarter
             if ($epicSquad) {
-                $epicSquad->update([
-                    'planned_quarter' => null,
-                    'sort_order' => null,
-                ]);
+                $epicSquad->delete();
             }
 
             return;
@@ -556,17 +558,14 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             $epic->update(['category_id' => $categoryId]);
         }
 
-        // Add to plan if not already
-        if (! $epicSquad || $epicSquad->planned_quarter !== $this->selectedQuarter) {
-            $existingPoints = $epicSquad?->story_points;
-
-            $epicSquad = EpicSquad::updateOrCreate(
-                ['epic_id' => $epicId, 'squad_id' => $squadId],
-                [
-                    'planned_quarter' => $this->selectedQuarter,
-                    'story_points' => $existingPoints,
-                ]
-            );
+        // Add to plan if not already in this quarter
+        if (! $epicSquad) {
+            $epicSquad = EpicSquad::create([
+                'epic_id' => $epicId,
+                'squad_id' => $squadId,
+                'planned_quarter' => $this->selectedQuarter,
+                'story_points' => null,  // Fresh estimate for new quarter
+            ]);
         }
 
         $epicSquad->move($position);
@@ -928,6 +927,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             @php
                 $singleSquadId = $selectedSquadIds[0] ?? null;
                 $data = $squadData[$singleSquadId] ?? null;
+                $singleSquadName = $squads->find($singleSquadId)?->name ?? 'Squad';
             @endphp
 
             @if($data)
@@ -1139,6 +1139,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                     :planned="true"
                                     :statuses="$statuses"
                                     :categories="$categories"
+                                    :quarter="$this->selectedQuarter"
+                                    :squadName="$singleSquadName"
                                 />
                             @empty
                                 <div class="min-h-[100px] border-2 border-dashed border-zinc-300 dark:border-zinc-600 rounded-lg"></div>
@@ -1170,6 +1172,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                     :planned="true"
                                     :statuses="$statuses"
                                     :categories="$categories"
+                                    :quarter="$this->selectedQuarter"
+                                    :squadName="$singleSquadName"
                                 />
                             @empty
                                 <div class="min-h-[100px] border-2 border-dashed border-zinc-300 dark:border-zinc-600 rounded-lg"></div>
@@ -1202,15 +1206,15 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     <div
                         x-show="expanded"
                         x-collapse
-                        class="overflow-x-auto pb-2"
+                        class="pb-2"
                     >
                         <div
-                            class="flex gap-3 min-w-max"
+                            class="flex flex-wrap gap-3"
                             x-sort="$wire.sort($item, $position, 'backlog', {{ $singleSquadId }})"
                             x-sort:group="planning-{{ $singleSquadId }}"
                         >
                             @forelse($backlogEpics as $epic)
-                                <div class="w-80 shrink-0">
+                                <div class="w-96 shrink-0">
                                     <x-planning.kanban-card :$epic :squadId="$singleSquadId" />
                                 </div>
                             @empty

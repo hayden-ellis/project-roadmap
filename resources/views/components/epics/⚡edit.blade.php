@@ -237,9 +237,11 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $syncData = [];
         foreach ($this->squad_ids as $squadId) {
             $storyPoints = $this->squad_data[$squadId]['story_points'] ?? '';
+            $startDate = $this->squad_data[$squadId]['start_date'] ?? '';
+            $endDate = $this->squad_data[$squadId]['end_date'] ?? '';
             $syncData[$squadId] = [
-                'start_date' => $this->squad_data[$squadId]['start_date'] ?? null,
-                'end_date' => $this->squad_data[$squadId]['end_date'] ?? null,
+                'start_date' => $startDate !== '' ? $startDate : null,
+                'end_date' => $endDate !== '' ? $endDate : null,
                 'story_points' => $storyPoints !== '' ? (int) $storyPoints : null,
             ];
         }

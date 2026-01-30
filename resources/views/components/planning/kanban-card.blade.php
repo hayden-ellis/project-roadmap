@@ -4,6 +4,8 @@
     'planned' => false,
     'statuses' => null,
     'categories' => null,
+    'quarter' => null,
+    'squadName' => null,
 ])
 
 @php
@@ -40,6 +42,8 @@
                 :storyPoints="$storyPoints"
                 :statuses="$statuses"
                 :categories="$categories"
+                :quarter="$quarter"
+                :squadName="$squadName"
             />
             @else
             {{-- Backlog: plain title --}}

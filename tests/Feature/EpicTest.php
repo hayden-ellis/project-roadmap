@@ -828,3 +828,62 @@ it('can discard category changes', function () {
         ->assertSet('category_id', (string) $category1->id)
         ->assertDontSee('You have unsaved changes');
 });
+
+// Squad Data Tests
+
+it('can clear squad dates when editing epic', function () {
+    $user = User::factory()->withPersonalTeam()->create();
+    $status = Status::first();
+    $squad = Squad::factory()->for($user->currentTeam)->create();
+
+    $epic = Epic::factory()
+        ->for($user->currentTeam)
+        ->for($status)
+        ->create();
+    $epic->squads()->attach($squad, [
+        'start_date' => '2026-01-01',
+        'end_date' => '2026-03-31',
+        'story_points' => 20,
+    ]);
+
+    $this->actingAs($user);
+
+    Livewire::test('epics.edit', ['epic' => $epic])
+        ->set('squad_data.'.$squad->id.'.start_date', '')
+        ->set('squad_data.'.$squad->id.'.end_date', '')
+        ->call('save')
+        ->assertRedirect('/epics');
+
+    $epic->refresh();
+    $pivot = $epic->squads->first()->pivot;
+    expect($pivot->start_date)->toBeNull()
+        ->and($pivot->end_date)->toBeNull()
+        ->and($pivot->story_points)->toBe(20);
+});
+
+it('can create epic with empty squad dates', function () {
+    $user = User::factory()->withPersonalTeam()->create();
+    $squad = Squad::factory()->for($user->currentTeam)->create();
+    $status = Status::where('slug', 'not-started')->first();
+
+    $this->actingAs($user);
+
+    Livewire::test('epics.create')
+        ->set('title', 'Epic Without Squad Dates')
+        ->set('description', 'Testing empty squad dates')
+        ->set('status_id', $status->id)
+        ->set('squad_ids', [$squad->id])
+        ->set('squad_data.'.$squad->id.'.start_date', '')
+        ->set('squad_data.'.$squad->id.'.end_date', '')
+        ->set('squad_data.'.$squad->id.'.story_points', 15)
+        ->call('save')
+        ->assertRedirect('/epics');
+
+    $epic = Epic::where('title', 'Epic Without Squad Dates')->first();
+    expect($epic)->not->toBeNull();
+
+    $pivot = $epic->squads->first()->pivot;
+    expect($pivot->start_date)->toBeNull()
+        ->and($pivot->end_date)->toBeNull()
+        ->and($pivot->story_points)->toBe(15);
+});
