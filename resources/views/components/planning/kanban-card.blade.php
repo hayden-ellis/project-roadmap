@@ -18,7 +18,7 @@
     wire:key="{{ $planned ? 'planned' : 'backlog' }}-{{ $epic->id }}"
     wire:transition
     {{ $attributes->class([
-        'group p-3 bg-white dark:bg-zinc-900 rounded-lg shadow-sm hover:shadow-md transition-all cursor-grab active:cursor-grabbing',
+        'group p-3 bg-white dark:bg-zinc-900 rounded-lg shadow-sm hover:shadow-md cursor-grab active:cursor-grabbing',
         'border',
         $borderColor,
     ]) }}
@@ -72,7 +72,7 @@
                 size="xs"
                 icon="x-mark"
                 wire:click="removeEpicFromPlan({{ $epic->id }}, {{ $squadId }})"
-                class="text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                class="text-red-500 opacity-0 group-hover:opacity-100"
             />
             @else
             <flux:button
@@ -80,7 +80,7 @@
                 size="xs"
                 icon="plus"
                 wire:click="addEpicToPlan({{ $epic->id }}, [{{ $squadId }}])"
-                class="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                class="shrink-0 opacity-0 group-hover:opacity-100"
             >
                 Add
             </flux:button>
