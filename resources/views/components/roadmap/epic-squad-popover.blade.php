@@ -4,7 +4,6 @@
     <div class="flex flex-col gap-3" x-data="{
         startDate: '{{ $work['start_date']?->format('Y-m-d') ?? '' }}',
         endDate: '{{ $work['end_date']?->format('Y-m-d') ?? '' }}',
-        storyPoints: {{ $work['story_points'] ?? 'null' }},
         saving: false,
         saved: false,
         saveData() {
@@ -14,8 +13,7 @@
                 {{ $epic->id }},
                 {{ $work['squad']->id }},
                 this.startDate || null,
-                this.endDate || null,
-                this.storyPoints ? parseInt(this.storyPoints) : null
+                this.endDate || null
             ).then(() => {
                 this.saving = false;
                 this.saved = true;
@@ -52,11 +50,6 @@
                     <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">End Date</flux:text>
                     <flux:input type="date" x-model="endDate" @change="saveData()" class="mt-1" size="sm" />
                 </div>
-            </div>
-
-            <div>
-                <flux:text class="text-xs text-zinc-500 dark:text-zinc-400 font-medium">Story Points</flux:text>
-                <flux:input type="number" x-model="storyPoints" @change="saveData()" class="mt-1" size="sm" placeholder="e.g., 21" min="0" />
             </div>
 
             @if($epic->squads->count() > 1)

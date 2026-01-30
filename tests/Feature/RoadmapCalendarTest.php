@@ -66,18 +66,16 @@ it('can update squad work inline from calendar', function () {
     $epic->squads()->attach($squad, [
         'start_date' => now()->addDays(10),
         'end_date' => now()->addDays(30),
-        'story_points' => 20,
     ]);
 
     $this->actingAs($user);
 
     Livewire::test('roadmap.calendar')
-        ->call('updateSquadWork', $epic->id, $squad->id, now()->addDays(15)->format('Y-m-d'), now()->addDays(35)->format('Y-m-d'), 30);
+        ->call('updateSquadWork', $epic->id, $squad->id, now()->addDays(15)->format('Y-m-d'), now()->addDays(35)->format('Y-m-d'));
 
     $pivot = $epic->squads()->first()->pivot;
     expect($pivot->start_date->format('Y-m-d'))->toEqual(now()->addDays(15)->format('Y-m-d'))
-        ->and($pivot->end_date->format('Y-m-d'))->toEqual(now()->addDays(35)->format('Y-m-d'))
-        ->and($pivot->story_points)->toBe(30);
+        ->and($pivot->end_date->format('Y-m-d'))->toEqual(now()->addDays(35)->format('Y-m-d'));
 });
 
 it('can clear squad work values with null', function () {
@@ -96,18 +94,16 @@ it('can clear squad work values with null', function () {
     $epic->squads()->attach($squad, [
         'start_date' => now()->addDays(10),
         'end_date' => now()->addDays(30),
-        'story_points' => 20,
     ]);
 
     $this->actingAs($user);
 
     Livewire::test('roadmap.calendar')
-        ->call('updateSquadWork', $epic->id, $squad->id, null, null, null);
+        ->call('updateSquadWork', $epic->id, $squad->id, null, null);
 
     expect($epic->squads()->first()->pivot)
         ->start_date->toBeNull()
-        ->end_date->toBeNull()
-        ->story_points->toBeNull();
+        ->end_date->toBeNull();
 });
 
 it('requires authorization to update squad work', function () {
@@ -129,6 +125,6 @@ it('requires authorization to update squad work', function () {
     $this->actingAs($user);
 
     Livewire::test('roadmap.calendar')
-        ->call('updateSquadWork', $epic->id, $squad->id, now()->addDays(15)->format('Y-m-d'), now()->addDays(35)->format('Y-m-d'), 30)
+        ->call('updateSquadWork', $epic->id, $squad->id, now()->addDays(15)->format('Y-m-d'), now()->addDays(35)->format('Y-m-d'))
         ->assertForbidden();
 });

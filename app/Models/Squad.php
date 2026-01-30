@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Squad extends Model
 {
@@ -25,13 +26,18 @@ class Squad extends Model
     public function epics(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
     {
         return $this->belongsToMany(Epic::class, 'epic_squad')
-            ->withPivot('start_date', 'end_date', 'story_points', 'planned_quarter')
+            ->withPivot('start_date', 'end_date')
             ->withTimestamps();
     }
 
     public function quarterPlans(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
         return $this->hasMany(QuarterPlan::class);
+    }
+
+    public function epicQuarterPlans(): HasMany
+    {
+        return $this->hasMany(EpicQuarterPlan::class);
     }
 
     public function stories(): \Illuminate\Database\Eloquent\Relations\HasMany

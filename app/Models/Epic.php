@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Epic extends Model
 {
@@ -48,8 +49,13 @@ class Epic extends Model
     {
         return $this->belongsToMany(Squad::class, 'epic_squad')
             ->using(EpicSquad::class)
-            ->withPivot('start_date', 'end_date', 'story_points', 'planned_quarter', 'sort_order')
+            ->withPivot('start_date', 'end_date')
             ->withTimestamps();
+    }
+
+    public function quarterPlans(): HasMany
+    {
+        return $this->hasMany(EpicQuarterPlan::class);
     }
 
     public function overlapsQuarter(string $quarter): bool

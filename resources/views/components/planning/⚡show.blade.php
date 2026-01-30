@@ -2,7 +2,7 @@
 
 use App\Models\Category;
 use App\Models\Epic;
-use App\Models\EpicSquad;
+use App\Models\EpicQuarterPlan;
 use App\Models\QuarterPlan;
 use App\Models\Status;
 use Carbon\Carbon;
@@ -205,14 +205,14 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     {
         $team = Auth::user()->currentTeam;
 
-        return DB::table('epic_squad')
-            ->join('epics', 'epic_squad.epic_id', '=', 'epics.id')
-            ->where('epic_squad.squad_id', $squadId)
-            ->where('epic_squad.planned_quarter', $this->selectedQuarter)
-            ->whereNotNull('epic_squad.story_points')
+        return DB::table('epic_quarter_plans')
+            ->join('epics', 'epic_quarter_plans.epic_id', '=', 'epics.id')
+            ->where('epic_quarter_plans.squad_id', $squadId)
+            ->where('epic_quarter_plans.quarter', $this->selectedQuarter)
+            ->whereNotNull('epic_quarter_plans.story_points')
             ->where('epics.team_id', $team->id)
             ->groupBy('epics.category_id')
-            ->selectRaw('epics.category_id, SUM(epic_squad.story_points) as total')
+            ->selectRaw('epics.category_id, SUM(epic_quarter_plans.story_points) as total')
             ->pluck('total', 'category_id')
             ->toArray();
     }
@@ -221,13 +221,13 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     {
         $team = Auth::user()->currentTeam;
 
-        return (int) DB::table('epic_squad')
-            ->join('epics', 'epic_squad.epic_id', '=', 'epics.id')
-            ->where('epic_squad.squad_id', $squadId)
-            ->where('epic_squad.planned_quarter', $this->selectedQuarter)
-            ->whereNotNull('epic_squad.story_points')
+        return (int) DB::table('epic_quarter_plans')
+            ->join('epics', 'epic_quarter_plans.epic_id', '=', 'epics.id')
+            ->where('epic_quarter_plans.squad_id', $squadId)
+            ->where('epic_quarter_plans.quarter', $this->selectedQuarter)
+            ->whereNotNull('epic_quarter_plans.story_points')
             ->where('epics.team_id', $team->id)
-            ->sum('epic_squad.story_points');
+            ->sum('epic_quarter_plans.story_points');
     }
 
     public function getPlannedEpicsForSquad(int $squadId): \Illuminate\Support\Collection
@@ -236,23 +236,27 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $selectedQuarter = $this->selectedQuarter;
 
         return $team->epics()
-            ->with(['status', 'squads', 'category'])
-            ->whereHas('squads', function ($q) use ($squadId, $selectedQuarter) {
-                $q->where('squads.id', $squadId)
-                    ->where('epic_squad.planned_quarter', $selectedQuarter);
+            ->with(['status', 'squads', 'category', 'quarterPlans'])
+            ->whereHas('quarterPlans', function ($q) use ($squadId, $selectedQuarter) {
+                $q->where('squad_id', $squadId)
+                    ->where('quarter', $selectedQuarter);
             })
-            ->join('epic_squad as es_order', function ($join) use ($squadId, $selectedQuarter) {
-                $join->on('epics.id', '=', 'es_order.epic_id')
-                    ->where('es_order.squad_id', '=', $squadId)
-                    ->where('es_order.planned_quarter', '=', $selectedQuarter);
+            ->join('epic_quarter_plans as eqp', function ($join) use ($squadId, $selectedQuarter) {
+                $join->on('epics.id', '=', 'eqp.epic_id')
+                    ->where('eqp.squad_id', '=', $squadId)
+                    ->where('eqp.quarter', '=', $selectedQuarter);
             })
-            ->orderByRaw('es_order.sort_order IS NULL, es_order.sort_order ASC')
+            ->orderByRaw('eqp.sort_order IS NULL, eqp.sort_order ASC')
             ->select('epics.*')
             ->get()
-            ->map(function ($epic) use ($squadId) {
-                $plannedPivot = $epic->squads->firstWhere('id', $squadId)?->pivot;
-                $epic->planned_story_points = $plannedPivot->story_points ?? null;
-                $epic->sort_order = $plannedPivot->sort_order ?? null;
+            ->map(function ($epic) use ($squadId, $selectedQuarter) {
+                // Find the quarter plan for THIS specific quarter
+                $quarterPlan = $epic->quarterPlans
+                    ->where('squad_id', $squadId)
+                    ->where('quarter', $selectedQuarter)
+                    ->first();
+                $epic->planned_story_points = $quarterPlan->story_points ?? null;
+                $epic->sort_order = $quarterPlan->sort_order ?? null;
 
                 return $epic;
             });
@@ -266,7 +270,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
         // Epics assigned to this squad but NOT in this quarter's plan
         return $team->epics()
-            ->with(['status', 'squads', 'category'])
+            ->with(['status', 'squads', 'category', 'quarterPlans'])
             ->whereHas('squads', function ($q) use ($squadId) {
                 $q->where('squads.id', $squadId);
             })
@@ -286,19 +290,18 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             ->get()
             ->filter(function ($epic) use ($squadId, $selectedQuarter) {
                 // Filter out epics that are already planned for this squad in this quarter
-                // With multi-quarter support, an epic can have multiple pivots for the same squad
-                // so we need to check if ANY pivot matches this squad+quarter
-                $hasPlannedPivot = $epic->squads
-                    ->where('id', $squadId)
-                    ->contains(fn($squad) => $squad->pivot->planned_quarter === $selectedQuarter);
-                return ! $hasPlannedPivot;
+                $hasQuarterPlan = $epic->quarterPlans
+                    ->where('squad_id', $squadId)
+                    ->where('quarter', $selectedQuarter)
+                    ->isNotEmpty();
+                return ! $hasQuarterPlan;
             })
             ->map(function ($epic) use ($squadId, $selectedQuarter) {
-                // Get story points from any existing pivot for this squad (prefer current quarter, then any)
-                $pivots = $epic->squads->where('id', $squadId);
-                $currentQuarterPivot = $pivots->first(fn($s) => $s->pivot->planned_quarter === $selectedQuarter);
-                $anyPivot = $pivots->first();
-                $epic->existing_story_points = $currentQuarterPivot?->pivot->story_points ?? $anyPivot?->pivot->story_points ?? null;
+                // Get story points from any existing quarter plan for this squad (prefer current quarter, then any)
+                $plans = $epic->quarterPlans->where('squad_id', $squadId);
+                $currentQuarterPlan = $plans->where('quarter', $selectedQuarter)->first();
+                $anyPlan = $plans->first();
+                $epic->existing_story_points = $currentQuarterPlan?->story_points ?? $anyPlan?->story_points ?? null;
                 return $epic;
             })
             ->values();
@@ -316,21 +319,19 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
         // Get epics planned for 2+ of the selected squads
         return $team->epics()
-            ->with(['status', 'squads', 'category'])
+            ->with(['status', 'squads', 'category', 'quarterPlans'])
             ->get()
             ->filter(function ($epic) use ($selectedSquadIds, $selectedQuarter) {
-                $plannedCount = $epic->squads
-                    ->whereIn('id', $selectedSquadIds)
-                    ->filter(fn($squad) => $squad->pivot->planned_quarter === $selectedQuarter)
+                $plannedCount = $epic->quarterPlans
+                    ->whereIn('squad_id', $selectedSquadIds)
+                    ->where('quarter', $selectedQuarter)
                     ->count();
                 return $plannedCount >= 2;
             })
             ->map(function ($epic) use ($selectedSquadIds, $selectedQuarter) {
                 $squadStoryPoints = [];
-                foreach ($epic->squads->whereIn('id', $selectedSquadIds) as $squad) {
-                    if ($squad->pivot->planned_quarter === $selectedQuarter) {
-                        $squadStoryPoints[$squad->id] = $squad->pivot->story_points;
-                    }
+                foreach ($epic->quarterPlans->whereIn('squad_id', $selectedSquadIds)->where('quarter', $selectedQuarter) as $plan) {
+                    $squadStoryPoints[$plan->squad_id] = $plan->story_points;
                 }
                 $epic->setAttribute('squad_story_points', $squadStoryPoints);
                 return $epic;
@@ -348,24 +349,25 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $otherSquadIds = array_values(array_diff($this->selectedSquadIds, [$squadId]));
 
         return $team->epics()
-            ->with(['status', 'squads', 'category'])
-            ->whereHas('squads', function ($q) use ($squadId, $selectedQuarter) {
-                $q->where('squads.id', $squadId)
-                    ->where('epic_squad.planned_quarter', $selectedQuarter);
+            ->with(['status', 'squads', 'category', 'quarterPlans'])
+            ->whereHas('quarterPlans', function ($q) use ($squadId, $selectedQuarter) {
+                $q->where('squad_id', $squadId)
+                    ->where('quarter', $selectedQuarter);
             })
             ->get()
             ->filter(function ($epic) use ($otherSquadIds, $selectedQuarter) {
                 // Filter out epics planned for any other selected squad
-                foreach ($epic->squads->whereIn('id', $otherSquadIds) as $squad) {
-                    if ($squad->pivot->planned_quarter === $selectedQuarter) {
-                        return false;
-                    }
-                }
-                return true;
+                return ! $epic->quarterPlans
+                    ->whereIn('squad_id', $otherSquadIds)
+                    ->where('quarter', $selectedQuarter)
+                    ->isNotEmpty();
             })
-            ->map(function ($epic) use ($squadId) {
-                $plannedPivot = $epic->squads->firstWhere('id', $squadId)?->pivot;
-                $epic->planned_story_points = $plannedPivot->story_points ?? null;
+            ->map(function ($epic) use ($squadId, $selectedQuarter) {
+                $quarterPlan = $epic->quarterPlans
+                    ->where('squad_id', $squadId)
+                    ->where('quarter', $selectedQuarter)
+                    ->first();
+                $epic->planned_story_points = $quarterPlan->story_points ?? null;
 
                 return $epic;
             });
@@ -384,7 +386,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
         // Get epics assigned to any selected squad
         return $team->epics()
-            ->with(['status', 'squads', 'category'])
+            ->with(['status', 'squads', 'category', 'quarterPlans'])
             ->whereHas('squads', function ($q) use ($selectedSquadIds) {
                 $q->whereIn('squads.id', $selectedSquadIds);
             })
@@ -405,11 +407,11 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 // Track which selected squads the epic is assigned to
                 $epic->assigned_squad_ids = $epic->squads->whereIn('id', $selectedSquadIds)->pluck('id')->toArray();
 
-                // Track which squads already have it planned
-                $epic->planned_for_squad_ids = $epic->squads
-                    ->whereIn('id', $selectedSquadIds)
-                    ->filter(fn($squad) => $squad->pivot->planned_quarter === $selectedQuarter)
-                    ->pluck('id')
+                // Track which squads already have it planned (via quarter plans)
+                $epic->planned_for_squad_ids = $epic->quarterPlans
+                    ->whereIn('squad_id', $selectedSquadIds)
+                    ->where('quarter', $selectedQuarter)
+                    ->pluck('squad_id')
                     ->toArray();
 
                 // Track which squads can still add it
@@ -437,20 +439,22 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 continue;
             }
 
-            $existingPivot = $epic->squads()->where('squads.id', $squadId)->first()?->pivot;
-            $existingPoints = $existingPivot->story_points ?? null;
-
-            if ($epic->squads()->where('squads.id', $squadId)->exists()) {
-                $epic->squads()->updateExistingPivot($squadId, [
-                    'planned_quarter' => $this->selectedQuarter,
-                    'story_points' => $existingPoints,
-                ]);
-            } else {
-                $epic->squads()->attach($squadId, [
-                    'planned_quarter' => $this->selectedQuarter,
-                    'story_points' => $existingPoints,
-                ]);
+            // Ensure squad assignment exists
+            if (! $epic->squads()->where('squads.id', $squadId)->exists()) {
+                $epic->squads()->attach($squadId);
             }
+
+            // Create quarter plan (or update if exists)
+            EpicQuarterPlan::updateOrCreate(
+                [
+                    'epic_id' => $epicId,
+                    'squad_id' => $squadId,
+                    'quarter' => $this->selectedQuarter,
+                ],
+                [
+                    'story_points' => null,
+                ]
+            );
         }
     }
 
@@ -474,10 +478,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         // Convert to int or null
         $storyPoints = $storyPoints !== '' && $storyPoints !== null ? (int) $storyPoints : null;
 
-        // Update the pivot for this specific quarter
-        EpicSquad::where('epic_id', $epicId)
+        // Update the quarter plan for this specific quarter
+        EpicQuarterPlan::where('epic_id', $epicId)
             ->where('squad_id', $squadId)
-            ->where('planned_quarter', $this->selectedQuarter)
+            ->where('quarter', $this->selectedQuarter)
             ->update(['story_points' => $storyPoints]);
     }
 
@@ -495,12 +499,12 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             'description' => $description ?: null,
         ]);
 
-        // Update story points on the pivot for this specific quarter
+        // Update story points on the quarter plan for this specific quarter
         if (in_array($squadId, $this->selectedSquadIds)) {
             $storyPoints = $storyPoints !== '' && $storyPoints !== null ? (int) $storyPoints : null;
-            EpicSquad::where('epic_id', $epicId)
+            EpicQuarterPlan::where('epic_id', $epicId)
                 ->where('squad_id', $squadId)
-                ->where('planned_quarter', $this->selectedQuarter)
+                ->where('quarter', $this->selectedQuarter)
                 ->update(['story_points' => $storyPoints]);
         }
     }
@@ -514,10 +518,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $epic = Epic::findOrFail($epicId);
         $this->authorizeEpic($epic);
 
-        // Delete the pivot record for this specific quarter only
-        EpicSquad::where('epic_id', $epicId)
+        // Delete the quarter plan for this specific quarter only (keeps squad assignment)
+        EpicQuarterPlan::where('epic_id', $epicId)
             ->where('squad_id', $squadId)
-            ->where('planned_quarter', $this->selectedQuarter)
+            ->where('quarter', $this->selectedQuarter)
             ->delete();
     }
 
@@ -542,16 +546,16 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             return;
         }
 
-        // Find existing pivot for THIS quarter
-        $epicSquad = EpicSquad::where('epic_id', $epicId)
+        // Find existing quarter plan for THIS quarter
+        $quarterPlan = EpicQuarterPlan::where('epic_id', $epicId)
             ->where('squad_id', $squadId)
-            ->where('planned_quarter', $this->selectedQuarter)
+            ->where('quarter', $this->selectedQuarter)
             ->first();
 
         if ($column === 'backlog') {
-            // Remove from plan - delete the pivot record for this quarter
-            if ($epicSquad) {
-                $epicSquad->delete();
+            // Remove from plan - delete the quarter plan for this quarter (keeps squad assignment)
+            if ($quarterPlan) {
+                $quarterPlan->delete();
             }
 
             return;
@@ -565,17 +569,22 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             $epic->update(['category_id' => $categoryId]);
         }
 
-        // Add to plan if not already in this quarter
-        if (! $epicSquad) {
-            $epicSquad = EpicSquad::create([
+        // Ensure squad assignment exists
+        if (! $epic->squads()->where('squads.id', $squadId)->exists()) {
+            $epic->squads()->attach($squadId);
+        }
+
+        // Add to quarter plan if not already in this quarter
+        if (! $quarterPlan) {
+            $quarterPlan = EpicQuarterPlan::create([
                 'epic_id' => $epicId,
                 'squad_id' => $squadId,
-                'planned_quarter' => $this->selectedQuarter,
-                'story_points' => null,  // Fresh estimate for new quarter
+                'quarter' => $this->selectedQuarter,
+                'story_points' => null,
             ]);
         }
 
-        $epicSquad->move($position);
+        $quarterPlan->move($position);
     }
 
     private function authorizeEpic(Epic $epic): void
@@ -887,9 +896,6 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                             <div class="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs bg-zinc-100 dark:bg-zinc-700">
                                 <div class="h-1.5 w-1.5 rounded-full" style="background-color: {{ $squad->color }}"></div>
                                 <span class="text-zinc-600 dark:text-zinc-300 max-w-18 truncate">{{ $squad->name }}</span>
-                                @if($squad->pivot->story_points)
-                                <span class="text-zinc-500 dark:text-zinc-400">{{ $squad->pivot->story_points }}</span>
-                                @endif
                                 @if(in_array($squad->id, $epic->planned_for_squad_ids))
                                     <flux:icon.check variant="micro" class="text-green-600 h-3 w-3" />
                                 @endif

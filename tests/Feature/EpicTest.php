@@ -231,14 +231,13 @@ it('shows warning when squad data is modified', function () {
     $epic->squads()->attach($squad, [
         'start_date' => '2025-01-01',
         'end_date' => '2025-03-31',
-        'story_points' => 10,
     ]);
 
     $this->actingAs($user);
 
     Livewire::test('epics.edit', ['epic' => $epic])
         ->assertDontSee('You have unsaved changes')
-        ->set('squad_data.'.$squad->id.'.story_points', '20')
+        ->set('squad_data.'.$squad->id.'.start_date', '2025-02-01')
         ->assertSee('You have unsaved changes');
 });
 
@@ -843,7 +842,6 @@ it('can clear squad dates when editing epic', function () {
     $epic->squads()->attach($squad, [
         'start_date' => '2026-01-01',
         'end_date' => '2026-03-31',
-        'story_points' => 20,
     ]);
 
     $this->actingAs($user);
@@ -857,8 +855,7 @@ it('can clear squad dates when editing epic', function () {
     $epic->refresh();
     $pivot = $epic->squads->first()->pivot;
     expect($pivot->start_date)->toBeNull()
-        ->and($pivot->end_date)->toBeNull()
-        ->and($pivot->story_points)->toBe(20);
+        ->and($pivot->end_date)->toBeNull();
 });
 
 it('can create epic with empty squad dates', function () {
@@ -875,7 +872,6 @@ it('can create epic with empty squad dates', function () {
         ->set('squad_ids', [$squad->id])
         ->set('squad_data.'.$squad->id.'.start_date', '')
         ->set('squad_data.'.$squad->id.'.end_date', '')
-        ->set('squad_data.'.$squad->id.'.story_points', 15)
         ->call('save')
         ->assertRedirect('/epics');
 
@@ -884,6 +880,5 @@ it('can create epic with empty squad dates', function () {
 
     $pivot = $epic->squads->first()->pivot;
     expect($pivot->start_date)->toBeNull()
-        ->and($pivot->end_date)->toBeNull()
-        ->and($pivot->story_points)->toBe(15);
+        ->and($pivot->end_date)->toBeNull();
 });

@@ -87,7 +87,6 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             $this->squad_data[$squad->id] = [
                 'start_date' => $squad->pivot->start_date ? \Carbon\Carbon::parse($squad->pivot->start_date)->format('Y-m-d') : '',
                 'end_date' => $squad->pivot->end_date ? \Carbon\Carbon::parse($squad->pivot->end_date)->format('Y-m-d') : '',
-                'story_points' => $squad->pivot->story_points ?? 0,
             ];
         }
 
@@ -142,16 +141,13 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
         // Check squad_data nested array
         foreach ($this->squad_ids as $squadId) {
-            $current = $this->squad_data[$squadId] ?? ['start_date' => '', 'end_date' => '', 'story_points' => ''];
-            $original = $this->original_squad_data[$squadId] ?? ['start_date' => '', 'end_date' => '', 'story_points' => ''];
+            $current = $this->squad_data[$squadId] ?? ['start_date' => '', 'end_date' => ''];
+            $original = $this->original_squad_data[$squadId] ?? ['start_date' => '', 'end_date' => ''];
 
             if ($current['start_date'] !== $original['start_date']) {
                 return true;
             }
             if ($current['end_date'] !== $original['end_date']) {
-                return true;
-            }
-            if ($current['story_points'] !== $original['story_points']) {
                 return true;
             }
         }
@@ -167,7 +163,6 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 $this->squad_data[$squadId] = [
                     'start_date' => $this->start_date,
                     'end_date' => $this->end_date,
-                    'story_points' => 0,
                 ];
             }
         }
@@ -188,7 +183,6 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             $this->squad_data[$squadId] = [
                 'start_date' => '',
                 'end_date' => '',
-                'story_points' => 0,
             ];
         }
 
@@ -233,16 +227,14 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             'end_date' => $this->end_date ?: null,
         ]);
 
-        // Sync squads with pivot data
+        // Sync squads with pivot data (dates only - story points managed via quarter planning)
         $syncData = [];
         foreach ($this->squad_ids as $squadId) {
-            $storyPoints = $this->squad_data[$squadId]['story_points'] ?? '';
             $startDate = $this->squad_data[$squadId]['start_date'] ?? '';
             $endDate = $this->squad_data[$squadId]['end_date'] ?? '';
             $syncData[$squadId] = [
                 'start_date' => $startDate !== '' ? $startDate : null,
                 'end_date' => $endDate !== '' ? $endDate : null,
-                'story_points' => $storyPoints !== '' ? (int) $storyPoints : null,
             ];
         }
 
@@ -430,23 +422,6 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                                 <div>
                                                     <flux:label class="text-xs">End Date</flux:label>
                                                     <flux:input type="date" wire:model.live="squad_data.{{ $squad->id }}.end_date" class="text-sm" />
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <flux:label class="text-xs">Story Points</flux:label>
-                                                <div class="flex items-center gap-3 -mt-1">
-                                                    <flux:slider 
-                                                        wire:model.live="squad_data.{{ $squad->id }}.story_points" 
-                                                        min="0" 
-                                                        max="250" 
-                                                        step="5" 
-                                                    />
-                                                    <flux:input 
-                                                        wire:model.live="squad_data.{{ $squad->id }}.story_points" 
-                                                        type="number" 
-                                                        size="sm" 
-                                                        class="max-w-20" 
-                                                    />
                                                 </div>
                                             </div>
                                         </div>

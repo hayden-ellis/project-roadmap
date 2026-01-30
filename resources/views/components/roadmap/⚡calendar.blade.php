@@ -22,7 +22,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
     #[Async]
     #[Renderless]
-    public function updateSquadWork(int $epicId, int $squadId, ?string $startDate, ?string $endDate, ?int $storyPoints): void
+    public function updateSquadWork(int $epicId, int $squadId, ?string $startDate, ?string $endDate): void
     {
         $epic = \App\Models\Epic::findOrFail($epicId);
         $this->authorize('update', $epic);
@@ -30,7 +30,6 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $epic->squads()->updateExistingPivot($squadId, [
             'start_date' => $startDate ?: null,
             'end_date' => $endDate ?: null,
-            'story_points' => $storyPoints ?: null,
         ]);
     }
 
@@ -302,11 +301,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                         'squad' => $squad,
                         'start_date' => $squadStartDate,
                         'end_date' => $squadEndDate,
-                        'story_points' => $squad->pivot->story_points,
                         'story_count' => $storyCount,
                     ];
                 }
-                
+
                 // Skip epic if no squad work overlaps with selected date range
                 if (empty($squadWork)) {
                     continue;
@@ -318,10 +316,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                         <div class="flex-shrink-0 py-1.5 px-3 border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-zinc-50 dark:bg-zinc-900 shadow-[2px_0_4px_rgba(0,0,0,0.05)]" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'" x-cloak>
                             <flux:tooltip :content="$epic->title" class="w-full">
                                 <a href="/epics/{{ $epic->id }}/edit" wire:navigate class="block hover:text-blue-600 dark:hover:text-blue-400">
-                                    @php
-                                        $totalPoints = collect($squadWork)->sum('story_points');
-                                    @endphp
-                                    <div class="text-sm font-bold truncate text-zinc-900 dark:text-zinc-100">{{ $epic->title }} @if($totalPoints)<span class="text-[10px] font-normal text-zinc-500 dark:text-zinc-400">({{ $totalPoints }} {{ Str::plural('pt', $totalPoints) }})</span>@endif</div>
+                                    <div class="text-sm font-bold truncate text-zinc-900 dark:text-zinc-100">{{ $epic->title }}</div>
                                 </a>
                             </flux:tooltip>
                         </div>
@@ -338,23 +333,13 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                             <div class="h-2 w-2 rounded-full flex-shrink-0" style="background-color: {{ $work['squad']->color }}"></div>
                             <span class="text-xs text-zinc-600 dark:text-zinc-400">{{ $work['squad']->name }}</span>
                         </div>
+                        @if($work['start_date'] && $work['end_date'])
                         <div class="flex items-center gap-2 flex-nowrap whitespace-nowrap mt-1">
-                            @if($work['story_points'])
-                                <div class="text-[10px] text-zinc-500 dark:text-zinc-400 w-8 tabular-nums">
-                                    {{ $work['story_points'] }} {{ Str::plural('pt', $work['story_points']) }}
-                                </div>
-                            @endif
-    
-                            @if($work['story_points'] && $work['start_date'] && $work['end_date'])
-                                <flux:separator vertical class="h-4" />
-                            @endif
-
-                            @if($work['start_date'] && $work['end_date'])
-                                <div class="text-[10px] text-zinc-500 dark:text-zinc-400">
-                                    {{ $work['start_date']->format('M j') }} - {{ $work['end_date']->format('M j') }}
-                                </div>
-                            @endif
+                            <div class="text-[10px] text-zinc-500 dark:text-zinc-400">
+                                {{ $work['start_date']->format('M j') }} - {{ $work['end_date']->format('M j') }}
+                            </div>
                         </div>
+                        @endif
                     </div>
                             <div class="flex-1 flex relative" style="min-height: 50px;">
                                 @if($work['start_date'] && $work['end_date'])
@@ -419,16 +404,6 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                                 <flux:dropdown position="top" align="start">
                                                     <button type="button" class="absolute top-2 bottom-2 rounded-lg flex items-center gap-2 px-2 text-white text-xs font-medium shadow-sm hover:shadow-md transition-shadow cursor-pointer"
                                                         style="left: {{ $leftPercent }}%; width: {{ $widthPercent }}%; background-color: {{ $work['squad']->color }}; {{ !$isFirstVisibleWeek ? 'border-top-left-radius: 0; border-bottom-left-radius: 0;' : '' }} {{ !$isLastWeek ? 'border-top-right-radius: 0; border-bottom-right-radius: 0;' : '' }}">
-                                                        @if($shouldShowLabel && $work['story_points'])
-                                                            @php
-                                                                $points = $work['story_points'];
-                                                                $tshirtSize = $points <= 10 ? 'XS' : ($points <= 20 ? 'SM' : ($points <= 40 ? 'M' : ($points <= 80 ? 'L' : ($points <= 100 ? 'XL' : 'XXL'))));
-                                                            @endphp
-                                                            <span class="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-white/25 border border-white/40 backdrop-blur-sm">
-                                                                {{ $tshirtSize }}
-                                                            </span>
-                                                            <span class="truncate">{{ $work['story_points'] }} pts</span>
-                                                        @endif
                                                     </button>
                                                     <x-roadmap.epic-squad-popover :epic="$epic" :work="$work" :squadStart="$squadStart" :squadEnd="$squadEnd" />
                                                 </flux:dropdown>
@@ -504,11 +479,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                 'squad' => $squad,
                                 'start_date' => $squadStartDate,
                                 'end_date' => $squadEndDate,
-                                'story_points' => $squad->pivot->story_points,
                                 'story_count' => $storyCount,
                             ];
                         }
-                        
+
                         // Skip epic if no squad work overlaps with selected date range
                         if (empty($squadWork)) {
                             continue;
@@ -520,10 +494,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                         <div class="flex-shrink-0 py-1.5 px-3 border-r border-zinc-200 dark:border-zinc-700 sticky left-0 z-10 bg-zinc-50 dark:bg-zinc-900 shadow-[2px_0_4px_rgba(0,0,0,0.05)]" :class="sidebarCollapsed ? 'w-48 lg:w-72' : 'w-48'" x-cloak>
                             <flux:tooltip :content="$epic->title" class="w-full">
                                 <a href="/epics/{{ $epic->id }}/edit" wire:navigate class="block hover:text-blue-600 dark:hover:text-blue-400">
-                                    @php
-                                        $totalPoints = collect($squadWork)->sum('story_points');
-                                    @endphp
-                                    <div class="text-sm font-bold truncate text-zinc-900 dark:text-zinc-100">{{ $epic->title }} @if($totalPoints)<span class="text-[10px] font-normal text-zinc-500 dark:text-zinc-400">({{ $totalPoints }} {{ Str::plural('pt', $totalPoints) }})</span>@endif</div>
+                                    <div class="text-sm font-bold truncate text-zinc-900 dark:text-zinc-100">{{ $epic->title }}</div>
                                 </a>
                             </flux:tooltip>
                         </div>
@@ -540,23 +511,13 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                     <div class="h-2 w-2 rounded-full flex-shrink-0" style="background-color: {{ $work['squad']->color }}"></div>
                                     <span class="text-xs text-zinc-600 dark:text-zinc-400">{{ $work['squad']->name }}</span>
                                 </div>
+                                @if($work['start_date'] && $work['end_date'])
                                 <div class="flex items-center gap-2 flex-nowrap whitespace-nowrap mt-1">
-                                    @if($work['story_points'])
-                                        <div class="text-[10px] text-zinc-500 dark:text-zinc-400 w-8 tabular-nums">
-                                            {{ $work['story_points'] }} {{ Str::plural('pt', $work['story_points']) }}
-                                        </div>
-                                    @endif
-            
-                                    @if($work['story_points'] && $work['start_date'] && $work['end_date'])
-                                        <flux:separator vertical class="h-4" />
-                                    @endif
-
-                                    @if($work['start_date'] && $work['end_date'])
-                                        <div class="text-[10px] text-zinc-500 dark:text-zinc-400">
-                                            {{ $work['start_date']->format('M j') }} - {{ $work['end_date']->format('M j') }}
-                                        </div>
-                                    @endif
+                                    <div class="text-[10px] text-zinc-500 dark:text-zinc-400">
+                                        {{ $work['start_date']->format('M j') }} - {{ $work['end_date']->format('M j') }}
+                                    </div>
                                 </div>
+                                @endif
                             </div>
                             <div class="flex-1 flex relative" style="min-height: 50px;">
                                 @if($work['start_date'] && $work['end_date'])
@@ -625,16 +586,6 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                                 <flux:dropdown position="top" align="start">
                                                     <button type="button" class="absolute top-2 bottom-2 rounded-lg flex items-center justify-center gap-2 px-2 text-white text-xs font-medium shadow-sm hover:shadow-md transition-shadow cursor-pointer"
                                                         style="left: {{ $leftPercent }}%; width: {{ $widthPercent }}%; background-color: {{ $work['squad']->color }}; {{ !$isFirstVisibleMonth ? 'border-top-left-radius: 0; border-bottom-left-radius: 0;' : '' }} {{ !$isLastMonth ? 'border-top-right-radius: 0; border-bottom-right-radius: 0;' : '' }}">
-                                                        @if($shouldShowLabel && $work['story_points'])
-                                                            @php
-                                                                $points = $work['story_points'];
-                                                                $tshirtSize = $points <= 10 ? 'XS' : ($points <= 20 ? 'SM' : ($points <= 40 ? 'M' : ($points <= 80 ? 'L' : ($points <= 100 ? 'XL' : 'XXL'))));
-                                                            @endphp
-                                                            <span class="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-white/25 border border-white/40 backdrop-blur-sm">
-                                                                {{ $tshirtSize }}
-                                                            </span>
-                                                            <span class="truncate">{{ $work['story_points'] }} pts</span>
-                                                        @endif
                                                     </button>
                                                     <x-roadmap.epic-squad-popover :epic="$epic" :work="$work" :squadStart="$squadStart" :squadEnd="$squadEnd" />
                                                 </flux:dropdown>
