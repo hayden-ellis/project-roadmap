@@ -66,7 +66,6 @@
         {{-- Actions --}}
         <div class="flex items-center gap-2 shrink-0">
             @if($planned)
-            <flux:badge color="zinc" size="sm" class="opacity-50">{{ $epic->sort_order ?? '?' }}</flux:badge>
             <flux:badge color="blue" size="sm">{{ $storyPoints }} pts</flux:badge>
             <flux:button
                 variant="ghost"

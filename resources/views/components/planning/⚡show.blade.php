@@ -485,7 +485,6 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             ->update(['story_points' => $storyPoints]);
     }
 
-    #[\Livewire\Attributes\Renderless]
     public function updateEpicFromPopover(int $epicId, int $squadId, $title, $storyPoints, $statusId, $categoryId, $description): void
     {
         $epic = Epic::findOrFail($epicId);
