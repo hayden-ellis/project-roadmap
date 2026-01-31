@@ -731,15 +731,15 @@ it('can update epic from popover including title', function () {
 
     expect($epic->title)->toBe('New Title')
         ->and($epic->description)->toBe('New description')
-        ->and($epic->status_id)->toBe($newStatus->id)
-        ->and($epic->category_id)->toBe($category->id);
+        ->and($epic->status_id)->toBe($newStatus->id);
 
-    // Check story points were updated on quarter plan
+    // Category is now per-plan, so check on quarter plan instead of epic
     $this->assertDatabaseHas('epic_quarter_plans', [
         'epic_id' => $epic->id,
         'squad_id' => $this->squad->id,
         'quarter' => 'Q1-2026',
         'story_points' => 25,
+        'category_id' => $category->id,
     ]);
 });
 
@@ -757,6 +757,7 @@ it('can clear epic category via popover', function () {
         'squad_id' => $this->squad->id,
         'quarter' => 'Q1-2026',
         'story_points' => 20,
+        'category_id' => $category->id,
     ]);
 
     Livewire::test('planning.show', ['plan' => null])
@@ -764,9 +765,13 @@ it('can clear epic category via popover', function () {
         ->set('selectedSquadIds', [$this->squad->id])
         ->call('updateEpicFromPopover', $epic->id, $this->squad->id, 'Epic with category', 20, $this->status->id, null, null);
 
-    $epic->refresh();
-
-    expect($epic->category_id)->toBeNull();
+    // Category is now per-plan, so check on quarter plan
+    $this->assertDatabaseHas('epic_quarter_plans', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+        'category_id' => null,
+    ]);
 });
 
 // Sort Handler Tests
@@ -822,16 +827,12 @@ it('can move epic from backlog to category column', function () {
         ->set('selectedSquadIds', [$this->squad->id])
         ->call('sort', $epic->id, 0, $category->id, $this->squad->id);
 
-    $epic->refresh();
-
-    // Epic should be assigned to category
-    expect($epic->category_id)->toBe($category->id);
-
-    // Epic should be planned for the quarter
+    // Category is now per-plan, so check on quarter plan
     $this->assertDatabaseHas('epic_quarter_plans', [
         'epic_id' => $epic->id,
         'squad_id' => $this->squad->id,
         'quarter' => 'Q1-2026',
+        'category_id' => $category->id,
     ]);
 });
 
@@ -845,27 +846,29 @@ it('can move epic between category columns', function () {
         ->for($category1)
         ->create(['title' => 'Epic to move']);
     $epic->squads()->attach($this->squad);
-    EpicQuarterPlan::create(['epic_id' => $epic->id, 'squad_id' => $this->squad->id, 'quarter' => 'Q1-2026', 'story_points' => 20]);
+    EpicQuarterPlan::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+        'story_points' => 20,
+        'category_id' => $category1->id,
+    ]);
 
     Livewire::test('planning.show', ['plan' => null])
         ->set('selectedQuarter', 'Q1-2026')
         ->set('selectedSquadIds', [$this->squad->id])
         ->call('sort', $epic->id, 0, $category2->id, $this->squad->id);
 
-    $epic->refresh();
-
-    // Epic should now be in category2
-    expect($epic->category_id)->toBe($category2->id);
-
-    // Epic should still be planned for the quarter
+    // Category is now per-plan, so check on quarter plan
     $this->assertDatabaseHas('epic_quarter_plans', [
         'epic_id' => $epic->id,
         'squad_id' => $this->squad->id,
         'quarter' => 'Q1-2026',
+        'category_id' => $category2->id,
     ]);
 });
 
-it('can move epic from category column to backlog', function () {
+it('can move epic from category column to other-backlog', function () {
     $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
 
     $epic = Epic::factory()
@@ -874,12 +877,18 @@ it('can move epic from category column to backlog', function () {
         ->for($category)
         ->create(['title' => 'Planned Epic']);
     $epic->squads()->attach($this->squad);
-    EpicQuarterPlan::create(['epic_id' => $epic->id, 'squad_id' => $this->squad->id, 'quarter' => 'Q1-2026', 'story_points' => 20]);
+    EpicQuarterPlan::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+        'story_points' => 20,
+        'category_id' => $category->id,
+    ]);
 
     Livewire::test('planning.show', ['plan' => null])
         ->set('selectedQuarter', 'Q1-2026')
         ->set('selectedSquadIds', [$this->squad->id])
-        ->call('sort', $epic->id, 0, 'backlog', $this->squad->id);
+        ->call('sort', $epic->id, 0, 'other-backlog', $this->squad->id);
 
     // Quarter plan record should be deleted
     $this->assertDatabaseMissing('epic_quarter_plans', [
@@ -898,23 +907,25 @@ it('can move epic to uncategorized column', function () {
         ->for($category)
         ->create(['title' => 'Categorized Epic']);
     $epic->squads()->attach($this->squad);
-    EpicQuarterPlan::create(['epic_id' => $epic->id, 'squad_id' => $this->squad->id, 'quarter' => 'Q1-2026', 'story_points' => 20]);
+    EpicQuarterPlan::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+        'story_points' => 20,
+        'category_id' => $category->id,
+    ]);
 
     Livewire::test('planning.show', ['plan' => null])
         ->set('selectedQuarter', 'Q1-2026')
         ->set('selectedSquadIds', [$this->squad->id])
         ->call('sort', $epic->id, 0, 'uncategorized', $this->squad->id);
 
-    $epic->refresh();
-
-    // Epic should have no category
-    expect($epic->category_id)->toBeNull();
-
-    // Epic should still be planned
+    // Category is now per-plan, so check on quarter plan
     $this->assertDatabaseHas('epic_quarter_plans', [
         'epic_id' => $epic->id,
         'squad_id' => $this->squad->id,
         'quarter' => 'Q1-2026',
+        'category_id' => null,
     ]);
 });
 
@@ -1161,9 +1172,14 @@ it('epic shows in backlog if not planned for current quarter but planned for ano
         ->set('selectedSquadIds', [$this->squad->id]);
 
     $squadData = $component->viewData('squadData');
-    $backlogEpics = $squadData[$this->squad->id]['backlog_epics'];
+    $backlogData = $squadData[$this->squad->id]['backlog_epics'];
 
-    expect($backlogEpics->pluck('id')->toArray())->toContain($epic->id);
+    // backlog_epics is now an array with 'considering' and 'other' keys
+    $allBacklogIds = $backlogData['considering']->pluck('id')
+        ->merge($backlogData['other']->pluck('id'))
+        ->toArray();
+
+    expect($allBacklogIds)->toContain($epic->id);
 });
 
 it('can clear story points to null via inline update', function () {
@@ -1288,19 +1304,25 @@ it('epic disappears from backlog after being added to plan via sort', function (
 
     // Verify epic is in backlog initially
     $squadData = $component->viewData('squadData');
-    $backlogEpics = $squadData[$this->squad->id]['backlog_epics'];
-    expect($backlogEpics->pluck('id')->toArray())->toContain($epic->id);
+    $backlogData = $squadData[$this->squad->id]['backlog_epics'];
+    $allBacklogIds = $backlogData['considering']->pluck('id')
+        ->merge($backlogData['other']->pluck('id'))
+        ->toArray();
+    expect($allBacklogIds)->toContain($epic->id);
 
     // Drag from backlog to planned (category column)
     $component->call('sort', $epic->id, 0, 'uncategorized', $this->squad->id);
 
     // Re-fetch view data after sort
     $squadData = $component->viewData('squadData');
-    $backlogEpics = $squadData[$this->squad->id]['backlog_epics'];
+    $backlogData = $squadData[$this->squad->id]['backlog_epics'];
+    $allBacklogIds = $backlogData['considering']->pluck('id')
+        ->merge($backlogData['other']->pluck('id'))
+        ->toArray();
     $plannedEpics = $squadData[$this->squad->id]['planned_epics'];
 
     // Epic should NOT be in backlog anymore
-    expect($backlogEpics->pluck('id')->toArray())->not->toContain($epic->id);
+    expect($allBacklogIds)->not->toContain($epic->id);
 
     // Epic should be in planned
     expect($plannedEpics->pluck('id')->toArray())->toContain($epic->id);
@@ -1353,16 +1375,19 @@ it('epic removed from plan stays in backlog if has other quarter plan', function
     $plannedEpics = $squadData[$this->squad->id]['planned_epics'];
     expect($plannedEpics->pluck('id')->toArray())->toContain($epic->id);
 
-    // Remove from Q1-2026 plan (drag to backlog)
-    $component->call('sort', $epic->id, 0, 'backlog', $this->squad->id);
+    // Remove from Q1-2026 plan (drag to other-backlog)
+    $component->call('sort', $epic->id, 0, 'other-backlog', $this->squad->id);
 
     // Re-fetch view data
     $squadData = $component->viewData('squadData');
-    $backlogEpics = $squadData[$this->squad->id]['backlog_epics'];
+    $backlogData = $squadData[$this->squad->id]['backlog_epics'];
+    $allBacklogIds = $backlogData['considering']->pluck('id')
+        ->merge($backlogData['other']->pluck('id'))
+        ->toArray();
     $plannedEpics = $squadData[$this->squad->id]['planned_epics'];
 
     // Epic should be in backlog now (still assigned to squad)
-    expect($backlogEpics->pluck('id')->toArray())->toContain($epic->id);
+    expect($allBacklogIds)->toContain($epic->id);
 
     // Epic should NOT be in planned anymore for Q1-2026
     expect($plannedEpics->pluck('id')->toArray())->not->toContain($epic->id);
@@ -1381,4 +1406,307 @@ it('epic removed from plan stays in backlog if has other quarter plan', function
         'quarter' => 'Q4-2025',
         'story_points' => 20,
     ]);
+});
+
+// Backlog Consideration Tests
+
+it('can toggle epic consideration for backlog', function () {
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create([
+            'start_date' => '2026-01-01',
+            'end_date' => '2026-03-31',
+        ]);
+    $epic->squads()->attach($this->squad);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('toggleConsideration', $epic->id, $this->squad->id);
+
+    $this->assertDatabaseHas('backlog_considerations', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+    ]);
+});
+
+it('can remove epic from consideration', function () {
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create([
+            'start_date' => '2026-01-01',
+            'end_date' => '2026-03-31',
+        ]);
+    $epic->squads()->attach($this->squad);
+
+    // First add to consideration
+    \App\Models\BacklogConsideration::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+    ]);
+
+    // Then toggle to remove
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('toggleConsideration', $epic->id, $this->squad->id);
+
+    $this->assertDatabaseMissing('backlog_considerations', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+    ]);
+});
+
+it('backlog epics are split into considering and other', function () {
+    $epic1 = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create([
+            'title' => 'Considering Epic',
+            'start_date' => '2026-01-01',
+            'end_date' => '2026-03-31',
+        ]);
+    $epic1->squads()->attach($this->squad);
+
+    $epic2 = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create([
+            'title' => 'Other Epic',
+            'start_date' => '2026-01-01',
+            'end_date' => '2026-03-31',
+        ]);
+    $epic2->squads()->attach($this->squad);
+
+    // Mark epic1 as considering
+    \App\Models\BacklogConsideration::create([
+        'epic_id' => $epic1->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+    ]);
+
+    $component = Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id]);
+
+    $squadData = $component->viewData('squadData');
+    $backlogData = $squadData[$this->squad->id]['backlog_epics'];
+
+    expect($backlogData)->toBeArray()
+        ->and($backlogData['considering'])->toHaveCount(1)
+        ->and($backlogData['considering']->first()->id)->toBe($epic1->id)
+        ->and($backlogData['other'])->toHaveCount(1)
+        ->and($backlogData['other']->first()->id)->toBe($epic2->id);
+});
+
+it('consideration is per-quarter', function () {
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create([
+            'start_date' => '2025-10-01',
+            'end_date' => '2026-06-30',
+        ]);
+    $epic->squads()->attach($this->squad);
+
+    // Mark as considering for Q1-2026
+    \App\Models\BacklogConsideration::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+    ]);
+
+    // Check Q1-2026 - should be in considering
+    $component = Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id]);
+
+    $squadData = $component->viewData('squadData');
+    $backlogData = $squadData[$this->squad->id]['backlog_epics'];
+    expect($backlogData['considering']->pluck('id')->toArray())->toContain($epic->id);
+
+    // Check Q2-2026 - should NOT be in considering (different quarter)
+    $component2 = Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q2-2026')
+        ->set('selectedSquadIds', [$this->squad->id]);
+
+    $squadData2 = $component2->viewData('squadData');
+    $backlogData2 = $squadData2[$this->squad->id]['backlog_epics'];
+    expect($backlogData2['considering']->pluck('id')->toArray())->not->toContain($epic->id)
+        ->and($backlogData2['other']->pluck('id')->toArray())->toContain($epic->id);
+});
+
+it('can drag epic from other-backlog to considering', function () {
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create([
+            'start_date' => '2026-01-01',
+            'end_date' => '2026-03-31',
+        ]);
+    $epic->squads()->attach($this->squad);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('sort', $epic->id, 0, 'considering', $this->squad->id);
+
+    $this->assertDatabaseHas('backlog_considerations', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+    ]);
+});
+
+it('can drag epic from considering to other-backlog', function () {
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create([
+            'start_date' => '2026-01-01',
+            'end_date' => '2026-03-31',
+        ]);
+    $epic->squads()->attach($this->squad);
+
+    // Start with epic in considering
+    \App\Models\BacklogConsideration::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+    ]);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('sort', $epic->id, 0, 'other-backlog', $this->squad->id);
+
+    $this->assertDatabaseMissing('backlog_considerations', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+    ]);
+});
+
+it('can drag epic from considering directly to category column', function () {
+    $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create([
+            'start_date' => '2026-01-01',
+            'end_date' => '2026-03-31',
+        ]);
+    $epic->squads()->attach($this->squad);
+
+    // Start with epic in considering
+    \App\Models\BacklogConsideration::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+    ]);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('sort', $epic->id, 0, $category->id, $this->squad->id);
+
+    // Epic should be planned
+    $this->assertDatabaseHas('epic_quarter_plans', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+        'category_id' => $category->id,
+    ]);
+});
+
+it('dragging planned epic to considering removes from plan and adds to considering', function () {
+    $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create();
+    $epic->squads()->attach($this->squad);
+    EpicQuarterPlan::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+        'category_id' => $category->id,
+        'story_points' => 20,
+    ]);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('sort', $epic->id, 0, 'considering', $this->squad->id);
+
+    // Should be removed from plan
+    $this->assertDatabaseMissing('epic_quarter_plans', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+    ]);
+
+    // Should be in considering
+    $this->assertDatabaseHas('backlog_considerations', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+    ]);
+});
+
+it('dragging planned epic to other-backlog removes from plan and not in considering', function () {
+    $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create();
+    $epic->squads()->attach($this->squad);
+    EpicQuarterPlan::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+        'category_id' => $category->id,
+        'story_points' => 20,
+    ]);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('sort', $epic->id, 0, 'other-backlog', $this->squad->id);
+
+    // Should be removed from plan
+    $this->assertDatabaseMissing('epic_quarter_plans', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+    ]);
+
+    // Should NOT be in considering
+    $this->assertDatabaseMissing('backlog_considerations', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+    ]);
+});
+
+it('cannot toggle consideration for epic from another team', function () {
+    $otherTeam = Team::factory()->create();
+    $otherEpic = Epic::factory()
+        ->for($otherTeam)
+        ->for($this->status)
+        ->create();
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('toggleConsideration', $otherEpic->id, $this->squad->id)
+        ->assertForbidden();
 });

@@ -6,11 +6,13 @@
     'categories' => null,
     'quarter' => null,
     'squadName' => null,
+    'isConsidering' => null,
 ])
 
 @php
     $borderColor = $planned ? 'border-green-200 dark:border-green-900' : 'border-zinc-200 dark:border-zinc-700';
     $storyPoints = $planned ? ($epic->planned_story_points ?? 0) : ($epic->existing_story_points ?? null);
+    $showConsideringToggle = !$planned && $isConsidering !== null;
 @endphp
 
 <div
@@ -38,15 +40,32 @@
             <flux:icon.x-mark variant="micro" />
         </button>
         @else
-        <div class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 z-10" x-on:click.stop>
-            <flux:button
-                variant="primary"
-                size="xs"
-                icon="plus"
-                wire:click="addEpicToPlan({{ $epic->id }}, [{{ $squadId }}])"
+        <div class="absolute top-1 right-1 flex items-center gap-1 z-10" x-on:click.stop>
+            {{-- Star/Consider toggle --}}
+            @if($showConsideringToggle)
+            <button
+                type="button"
+                wire:click="toggleConsideration({{ $epic->id }}, {{ $squadId }})"
+                class="{{ $isConsidering ? 'text-amber-500' : 'opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-amber-500' }} p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all"
             >
-                Add
-            </flux:button>
+                @if($isConsidering)
+                <flux:icon.star variant="solid" class="size-4" />
+                @else
+                <flux:icon.star variant="outline" class="size-4" />
+                @endif
+            </button>
+            @endif
+            {{-- Add button --}}
+            <div class="opacity-0 group-hover:opacity-100">
+                <flux:button
+                    variant="primary"
+                    size="xs"
+                    icon="plus"
+                    wire:click="addEpicToPlan({{ $epic->id }}, [{{ $squadId }}])"
+                >
+                    Add
+                </flux:button>
+            </div>
         </div>
         @endif
 

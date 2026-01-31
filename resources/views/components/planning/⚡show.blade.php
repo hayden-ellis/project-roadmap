@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\BacklogConsideration;
 use App\Models\Category;
 use App\Models\Epic;
 use App\Models\EpicQuarterPlan;
@@ -335,14 +336,20 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             });
     }
 
-    public function getBacklogEpicsForSquad(int $squadId): \Illuminate\Support\Collection
+    public function getBacklogEpicsForSquad(int $squadId): array
     {
         $team = Auth::user()->currentTeam;
         $selectedQuarter = $this->selectedQuarter;
         $quarterDates = QuarterPlan::getQuarterDates($selectedQuarter);
 
+        // Get IDs of epics being considered for this quarter
+        $consideringIds = BacklogConsideration::where('squad_id', $squadId)
+            ->where('quarter', $selectedQuarter)
+            ->pluck('epic_id')
+            ->toArray();
+
         // Epics assigned to this squad but NOT in this quarter's plan
-        return $team->epics()
+        $epics = $team->epics()
             ->with([
                 'status',
                 'squads',
@@ -372,14 +379,46 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 });
             })
             ->get()
-            ->map(function ($epic) use ($selectedQuarter) {
+            ->map(function ($epic) use ($selectedQuarter, $consideringIds) {
                 // Get story points from any existing quarter plan for this squad
                 $currentQuarterPlan = $epic->quarterPlans->where('quarter', $selectedQuarter)->first();
                 $anyPlan = $epic->quarterPlans->first();
                 $epic->existing_story_points = $currentQuarterPlan?->story_points ?? $anyPlan?->story_points ?? null;
+                $epic->is_considering = in_array($epic->id, $consideringIds);
                 return $epic;
             })
             ->values();
+
+        // Split into considering and other
+        return [
+            'considering' => $epics->filter(fn ($e) => $e->is_considering)->values(),
+            'other' => $epics->filter(fn ($e) => ! $e->is_considering)->values(),
+        ];
+    }
+
+    public function toggleConsideration(int $epicId, int $squadId): void
+    {
+        if (! in_array($squadId, $this->selectedSquadIds)) {
+            return;
+        }
+
+        $epic = Epic::findOrFail($epicId);
+        $this->authorizeEpic($epic);
+
+        $existing = BacklogConsideration::where('epic_id', $epicId)
+            ->where('squad_id', $squadId)
+            ->where('quarter', $this->selectedQuarter)
+            ->first();
+
+        if ($existing) {
+            $existing->delete();
+        } else {
+            BacklogConsideration::create([
+                'epic_id' => $epicId,
+                'squad_id' => $squadId,
+                'quarter' => $this->selectedQuarter,
+            ]);
+        }
     }
 
     public function getSharedPlannedEpics(): \Illuminate\Support\Collection
@@ -691,10 +730,32 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             ->where('quarter', $this->selectedQuarter)
             ->first();
 
-        if ($column === 'backlog') {
-            // Remove from plan - delete the quarter plan for this quarter (keeps squad assignment)
+        // Handle backlog sections (considering and other-backlog)
+        if ($column === 'considering' || $column === 'other-backlog') {
+            // Remove from plan if it was planned
             if ($quarterPlan) {
                 $quarterPlan->delete();
+            }
+
+            // Toggle consideration based on target column
+            $isCurrentlyConsidering = BacklogConsideration::where('epic_id', $epicId)
+                ->where('squad_id', $squadId)
+                ->where('quarter', $this->selectedQuarter)
+                ->exists();
+
+            if ($column === 'considering' && ! $isCurrentlyConsidering) {
+                // Add to considering
+                BacklogConsideration::create([
+                    'epic_id' => $epicId,
+                    'squad_id' => $squadId,
+                    'quarter' => $this->selectedQuarter,
+                ]);
+            } elseif ($column === 'other-backlog' && $isCurrentlyConsidering) {
+                // Remove from considering
+                BacklogConsideration::where('epic_id', $epicId)
+                    ->where('squad_id', $squadId)
+                    ->where('quarter', $this->selectedQuarter)
+                    ->delete();
             }
 
             return;
@@ -1116,7 +1177,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 $capacity = $data['capacity'];
                 $totalAllocated = $data['allocated'];
                 $actualByCategory = $data['actual_by_category'] ?? [];
-                $backlogEpics = $data['backlog_epics'] ?? collect();
+                $backlogData = $data['backlog_epics'] ?? ['considering' => collect(), 'other' => collect()];
+                $consideringEpics = $backlogData['considering'] ?? collect();
+                $otherBacklogEpics = $backlogData['other'] ?? collect();
+                $backlogEpicsCount = $consideringEpics->count() + $otherBacklogEpics->count();
                 $plannedEpics = $data['planned_epics'] ?? collect();
 
                 // Group planned epics by plan's category (not epic's global category)
@@ -1159,7 +1223,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 <flux:separator vertical class="h-5" />
                 <div class="flex items-center gap-1.5">
                     <flux:icon.inbox variant="micro" class="text-zinc-400" />
-                    <flux:text class="text-sm">{{ $backlogEpics->count() }} in backlog</flux:text>
+                    <flux:text class="text-sm">{{ $backlogEpicsCount }} in backlog</flux:text>
                 </div>
                 @if($isOverAllocated)
                 <flux:badge color="red" size="sm">{{ abs($remaining) }} pts over</flux:badge>
@@ -1418,9 +1482,49 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             </div>
 
             {{-- Backlog Section (Below) --}}
-            <div class="mt-6 border-t border-zinc-200 dark:border-zinc-700 pt-6">
+            <div class="mt-6 border-t border-zinc-200 dark:border-zinc-700 pt-6 space-y-6">
+                {{-- Considering Section --}}
                 <div x-data="{ expanded: true }" class="space-y-3">
-                    {{-- Backlog Header --}}
+                    <div class="flex items-center justify-between">
+                        <button
+                            @click="expanded = !expanded"
+                            class="flex items-center gap-2 text-left"
+                        >
+                            <flux:icon.chevron-right
+                                class="h-4 w-4 text-zinc-400 transition-transform"
+                                ::class="expanded && 'rotate-90'"
+                            />
+                            <flux:icon.star variant="mini" class="text-amber-500" />
+                            <span class="font-medium text-zinc-600 dark:text-zinc-400">Considering</span>
+                            <flux:badge color="amber" size="sm">{{ $consideringEpics->count() }}</flux:badge>
+                        </button>
+                    </div>
+
+                    <div
+                        x-show="expanded"
+                        x-collapse
+                        class="pb-2"
+                    >
+                        <div
+                            class="flex flex-wrap gap-3 min-h-[40px]"
+                            x-sort="$wire.sort($item, $position, 'considering', {{ $singleSquadId }})"
+                            x-sort:group="planning-{{ $singleSquadId }}"
+                        >
+                            @forelse($consideringEpics as $epic)
+                                <div class="w-96 shrink-0">
+                                    <x-planning.kanban-card :$epic :squadId="$singleSquadId" :isConsidering="true" />
+                                </div>
+                            @empty
+                                <div class="text-zinc-400 text-sm py-4 pointer-events-none">
+                                    Star items from the backlog or drag them here.
+                                </div>
+                            @endforelse
+                        </div>
+                    </div>
+                </div>
+
+                {{-- Other Backlog Section --}}
+                <div x-data="{ expanded: {{ $consideringEpics->isEmpty() ? 'true' : 'false' }} }" class="space-y-3">
                     <div class="flex items-center justify-between">
                         <button
                             @click="expanded = !expanded"
@@ -1431,28 +1535,27 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                 ::class="expanded && 'rotate-90'"
                             />
                             <flux:icon.inbox variant="mini" class="text-zinc-400" />
-                            <span class="font-medium text-zinc-600 dark:text-zinc-400">Backlog</span>
-                            <flux:badge color="zinc" size="sm">{{ $backlogEpics->count() }}</flux:badge>
+                            <span class="font-medium text-zinc-600 dark:text-zinc-400">Other Backlog</span>
+                            <flux:badge color="zinc" size="sm">{{ $otherBacklogEpics->count() }}</flux:badge>
                         </button>
                     </div>
 
-                    {{-- Backlog Cards (Horizontal Scroll) --}}
                     <div
                         x-show="expanded"
                         x-collapse
                         class="pb-2"
                     >
                         <div
-                            class="flex flex-wrap gap-3"
-                            x-sort="$wire.sort($item, $position, 'backlog', {{ $singleSquadId }})"
+                            class="flex flex-wrap gap-3 min-h-[40px]"
+                            x-sort="$wire.sort($item, $position, 'other-backlog', {{ $singleSquadId }})"
                             x-sort:group="planning-{{ $singleSquadId }}"
                         >
-                            @forelse($backlogEpics as $epic)
+                            @forelse($otherBacklogEpics as $epic)
                                 <div class="w-96 shrink-0">
-                                    <x-planning.kanban-card :$epic :squadId="$singleSquadId" />
+                                    <x-planning.kanban-card :$epic :squadId="$singleSquadId" :isConsidering="false" />
                                 </div>
                             @empty
-                                <div class="text-zinc-400 text-sm py-4">
+                                <div class="text-zinc-400 text-sm py-4 pointer-events-none">
                                     No epics in backlog. Assign epics to this squad to see them here.
                                 </div>
                             @endforelse
