@@ -321,18 +321,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     ->where('eqp.quarter', '=', $selectedQuarter);
             })
             ->orderByRaw('eqp.sort_order IS NULL, eqp.sort_order ASC')
-            ->select('epics.*')
-            ->get()
-            ->map(function ($epic) {
-                // With constrained eager load, quarterPlans only has the relevant one
-                $quarterPlan = $epic->quarterPlans->first();
-                $epic->planned_story_points = $quarterPlan->story_points ?? null;
-                $epic->sort_order = $quarterPlan->sort_order ?? null;
-                // Use plan's category for grouping (not epic's global category)
-                $epic->plan_category_id = $quarterPlan->category_id ?? null;
-
-                return $epic;
-            });
+            ->select('epics.*', 'eqp.story_points as planned_story_points', 'eqp.sort_order', 'eqp.category_id as plan_category_id')
+            ->get();
     }
 
     public function getBacklogEpicsForSquad(int $squadId): array
@@ -557,9 +547,15 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 $epic->squads()->attach($squadId);
             }
 
-            // Create quarter plan (or update if exists)
-            // Use epic's category as initial plan category
-            EpicQuarterPlan::updateOrCreate(
+            // Check for existing story points from another quarter (to pre-fill)
+            $existingPlan = EpicQuarterPlan::where('epic_id', $epicId)
+                ->where('squad_id', $squadId)
+                ->whereNotNull('story_points')
+                ->first();
+
+            // Create quarter plan if doesn't exist (don't overwrite existing story_points)
+            // Use epic's category as initial plan category, copy story_points from other quarters
+            EpicQuarterPlan::firstOrCreate(
                 [
                     'epic_id' => $epicId,
                     'squad_id' => $squadId,
@@ -567,7 +563,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 ],
                 [
                     'category_id' => $epic->category_id,
-                    'story_points' => null,
+                    'story_points' => $existingPlan?->story_points,
                 ]
             );
         }
@@ -769,12 +765,18 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
         // Add to quarter plan if not already in this quarter
         if (! $quarterPlan) {
+            // Check for existing story points from another quarter (to pre-fill)
+            $existingPlan = EpicQuarterPlan::where('epic_id', $epicId)
+                ->where('squad_id', $squadId)
+                ->whereNotNull('story_points')
+                ->first();
+
             $quarterPlan = EpicQuarterPlan::create([
                 'epic_id' => $epicId,
                 'category_id' => $categoryId,
                 'squad_id' => $squadId,
                 'quarter' => $this->selectedQuarter,
-                'story_points' => null,
+                'story_points' => $existingPlan?->story_points,
             ]);
         }
 

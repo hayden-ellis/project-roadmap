@@ -40,32 +40,16 @@
             <flux:icon.x-mark variant="micro" />
         </button>
         @else
-        <div class="absolute top-1 right-1 flex items-center gap-1 z-10" x-on:click.stop>
-            {{-- Star/Consider toggle --}}
-            @if($showConsideringToggle)
-            <button
-                type="button"
-                wire:click="toggleConsideration({{ $epic->id }}, {{ $squadId }})"
-                class="{{ $isConsidering ? 'text-amber-500' : 'opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-amber-500' }} p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all"
+        {{-- Add button (top right, hover only) --}}
+        <div class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 z-10" x-on:click.stop>
+            <flux:button
+                variant="primary"
+                size="xs"
+                icon="plus"
+                wire:click="addEpicToPlan({{ $epic->id }}, [{{ $squadId }}])"
             >
-                @if($isConsidering)
-                <flux:icon.star variant="solid" class="size-4" />
-                @else
-                <flux:icon.star variant="outline" class="size-4" />
-                @endif
-            </button>
-            @endif
-            {{-- Add button --}}
-            <div class="opacity-0 group-hover:opacity-100">
-                <flux:button
-                    variant="primary"
-                    size="xs"
-                    icon="plus"
-                    wire:click="addEpicToPlan({{ $epic->id }}, [{{ $squadId }}])"
-                >
-                    Add
-                </flux:button>
-            </div>
+                Add
+            </flux:button>
         </div>
         @endif
 
@@ -84,9 +68,32 @@
                 @endif
             </div>
 
-            @if($storyPoints)
-            <flux:badge color="blue" size="sm">{{ $storyPoints }} pts</flux:badge>
-            @endif
+            <div class="flex items-center gap-1.5">
+                {{-- Star toggle for backlog items --}}
+                @if($showConsideringToggle)
+                <button
+                    type="button"
+                    wire:click.stop="toggleConsideration({{ $epic->id }}, {{ $squadId }})"
+                    class="{{ $isConsidering ? 'text-amber-500' : 'opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-amber-500' }} p-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all"
+                >
+                    @if($isConsidering)
+                    <flux:icon.star variant="solid" class="size-4" />
+                    @else
+                    <flux:icon.star variant="outline" class="size-4" />
+                    @endif
+                </button>
+                @endif
+
+                @if($planned)
+                    @if($storyPoints)
+                    <flux:badge color="blue" size="sm">{{ $storyPoints }} pts</flux:badge>
+                    @else
+                    <flux:badge color="zinc" size="sm">– pts</flux:badge>
+                    @endif
+                @else
+                    <flux:badge color="{{ $storyPoints ? 'blue' : 'zinc' }}" size="sm">{{ $storyPoints ? $storyPoints . ' pts' : '– pts' }}</flux:badge>
+                @endif
+            </div>
         </div>
     </div>
 
