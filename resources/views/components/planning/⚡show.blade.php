@@ -613,16 +613,27 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             'description' => $description ?: null,
         ]);
 
-        // Update story points and category on the quarter plan for this specific quarter
+        // Update or create quarter plan for this specific quarter
+        // This allows editing backlog epics (creates plan) or planned epics (updates plan)
         if (in_array($squadId, $this->selectedSquadIds)) {
             $storyPoints = $storyPoints !== '' && $storyPoints !== null ? (int) $storyPoints : null;
-            EpicQuarterPlan::where('epic_id', $epicId)
-                ->where('squad_id', $squadId)
-                ->where('quarter', $this->selectedQuarter)
-                ->update([
+
+            // Ensure squad assignment exists
+            if (! $epic->squads()->where('squads.id', $squadId)->exists()) {
+                $epic->squads()->attach($squadId);
+            }
+
+            EpicQuarterPlan::updateOrCreate(
+                [
+                    'epic_id' => $epicId,
+                    'squad_id' => $squadId,
+                    'quarter' => $this->selectedQuarter,
+                ],
+                [
                     'story_points' => $storyPoints,
                     'category_id' => $categoryId ?: null,
-                ]);
+                ]
+            );
         }
     }
 
@@ -1510,15 +1521,23 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                             x-sort="$wire.sort($item, $position, 'considering', {{ $singleSquadId }})"
                             x-sort:group="planning-{{ $singleSquadId }}"
                         >
-                            @forelse($consideringEpics as $epic)
+                            @foreach($consideringEpics as $epic)
                                 <div class="w-96 shrink-0">
-                                    <x-planning.kanban-card :$epic :squadId="$singleSquadId" :isConsidering="true" />
+                                    <x-planning.kanban-card
+                                        :$epic
+                                        :squadId="$singleSquadId"
+                                        :isConsidering="true"
+                                        :statuses="$statuses"
+                                        :categories="$allCategories"
+                                        :quarter="$this->selectedQuarter"
+                                        :squadName="$singleSquadName"
+                                    />
                                 </div>
-                            @empty
-                                <div class="text-zinc-400 text-sm py-4 pointer-events-none">
-                                    Star items from the backlog or drag them here.
-                                </div>
-                            @endforelse
+                            @endforeach
+                            {{-- Drop zone placeholder --}}
+                            <div class="w-96 shrink-0 min-h-[100px] border-2 border-dashed border-amber-300 dark:border-amber-700 rounded-lg flex items-center justify-center">
+                                <span class="text-zinc-400 text-sm">{{ $consideringEpics->isEmpty() ? 'Star items or drag here' : '' }}</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1550,15 +1569,23 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                             x-sort="$wire.sort($item, $position, 'other-backlog', {{ $singleSquadId }})"
                             x-sort:group="planning-{{ $singleSquadId }}"
                         >
-                            @forelse($otherBacklogEpics as $epic)
+                            @foreach($otherBacklogEpics as $epic)
                                 <div class="w-96 shrink-0">
-                                    <x-planning.kanban-card :$epic :squadId="$singleSquadId" :isConsidering="false" />
+                                    <x-planning.kanban-card
+                                        :$epic
+                                        :squadId="$singleSquadId"
+                                        :isConsidering="false"
+                                        :statuses="$statuses"
+                                        :categories="$allCategories"
+                                        :quarter="$this->selectedQuarter"
+                                        :squadName="$singleSquadName"
+                                    />
                                 </div>
-                            @empty
-                                <div class="text-zinc-400 text-sm py-4 pointer-events-none">
-                                    No epics in backlog. Assign epics to this squad to see them here.
-                                </div>
-                            @endforelse
+                            @endforeach
+                            {{-- Drop zone placeholder --}}
+                            <div class="w-96 shrink-0 min-h-[100px] border-2 border-dashed border-zinc-300 dark:border-zinc-600 rounded-lg flex items-center justify-center">
+                                <span class="text-zinc-400 text-sm">{{ $otherBacklogEpics->isEmpty() ? 'Drop items here' : '' }}</span>
+                            </div>
                         </div>
                     </div>
                 </div>

@@ -21,7 +21,7 @@
     wire:transition
 >
     <div
-        @if($planned && $statuses && $categories)
+        @if($statuses && $categories)
         x-on:click="$dispatch('modal-show', { name: 'edit-epic-{{ $epic->id }}' })"
         @endif
         {{ $attributes->class([
@@ -90,7 +90,7 @@
         </div>
     </div>
 
-    @if($planned && $statuses && $categories)
+    @if($statuses && $categories)
     <x-planning.epic-modal
         :epic="$epic"
         :squadId="$squadId"

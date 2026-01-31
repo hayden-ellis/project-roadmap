@@ -1710,3 +1710,44 @@ it('cannot toggle consideration for epic from another team', function () {
         ->call('toggleConsideration', $otherEpic->id, $this->squad->id)
         ->assertForbidden();
 });
+
+it('can edit backlog epic via popover and creates quarter plan', function () {
+    $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create([
+            'title' => 'Backlog Epic',
+            'start_date' => '2026-01-01',
+            'end_date' => '2026-03-31',
+        ]);
+    $epic->squads()->attach($this->squad);
+
+    // Verify no quarter plan exists initially
+    $this->assertDatabaseMissing('epic_quarter_plans', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+    ]);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$this->squad->id])
+        ->call('updateEpicFromPopover', $epic->id, $this->squad->id, 'Updated Title', 15, $this->status->id, $category->id, 'New description');
+
+    $epic->refresh();
+
+    // Epic fields should be updated
+    expect($epic->title)->toBe('Updated Title')
+        ->and($epic->description)->toBe('New description');
+
+    // Quarter plan should now exist with category and story points
+    $this->assertDatabaseHas('epic_quarter_plans', [
+        'epic_id' => $epic->id,
+        'squad_id' => $this->squad->id,
+        'quarter' => 'Q1-2026',
+        'story_points' => 15,
+        'category_id' => $category->id,
+    ]);
+});
