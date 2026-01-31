@@ -25,7 +25,6 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
     public array $categoryTargets = [];
 
-    public bool $capacityExpanded = false;
 
     public function mount(?QuarterPlan $plan = null): void
     {
@@ -646,11 +645,6 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             ->delete();
     }
 
-    public function toggleCapacity(): void
-    {
-        $this->capacityExpanded = ! $this->capacityExpanded;
-    }
-
     public function addCategoryToPlan(int $categoryId, int $squadId): void
     {
         if (! in_array($squadId, $this->selectedSquadIds)) {
@@ -878,7 +872,6 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             'availableCategoriesForPlan' => $availableCategoriesForPlan,
             'statuses' => $statuses,
             'categoryTargets' => $this->categoryTargets,
-            'capacityExpanded' => $this->capacityExpanded,
         ];
     }
 };
@@ -1237,12 +1230,12 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             </div>
 
             {{-- Collapsible Capacity & Categories Section --}}
-            <div class="mb-6" x-data="{ expanded: @js($capacityExpanded) }" x-cloak>
+            <div class="mb-6" x-data="{ expanded: false }" x-cloak>
                 <flux:card class="overflow-hidden">
                     {{-- Collapsed Header (always visible) --}}
                     <button
                         type="button"
-                        @click="expanded = !expanded; $wire.toggleCapacity()"
+                        @click="expanded = !expanded"
                         class="w-full flex items-center justify-between gap-4 p-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
                     >
                         <div class="flex items-center gap-3">
@@ -1314,6 +1307,22 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                     </div>
                                 @endif
                             </div>
+
+                            {{-- Category breakdown legend --}}
+                            @if($totalAllocated > 0)
+                            <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-600 dark:text-zinc-400">
+                                @foreach($categoryData as $catData)
+                                    @if($catData['actual'] > 0)
+                                    <div class="flex items-center gap-1.5">
+                                        <div class="h-2 w-2 rounded-sm" style="background-color: {{ $catData['category']->color ?? '#6B7280' }}"></div>
+                                        <span>{{ $catData['category']->name }}</span>
+                                        <span class="tabular-nums font-medium">{{ $catData['actual'] }}</span>
+                                        <span class="text-zinc-400">({{ round(($catData['actual'] / $capacity) * 100) }}%)</span>
+                                    </div>
+                                    @endif
+                                @endforeach
+                            </div>
+                            @endif
 
                             {{-- Category targets --}}
                             @if($categories->isNotEmpty())
