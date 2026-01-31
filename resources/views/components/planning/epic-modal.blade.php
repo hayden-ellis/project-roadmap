@@ -1,9 +1,16 @@
-@props(['epic', 'squadId', 'storyPoints', 'statuses', 'categories', 'quarter', 'squadName'])
+@props(['epic', 'squadId', 'storyPoints', 'estimatedPoints', 'statuses', 'categories', 'quarter', 'squadName'])
+
+@php
+    // Calculate total committed across all quarters for this squad
+    $totalCommittedAllQuarters = $epic->quarterPlans?->where('squad_id', $squadId)->sum('story_points') ?? 0;
+    $committedOtherQuarters = $totalCommittedAllQuarters - ($storyPoints ?? 0);
+@endphp
 
 <flux:modal name="edit-epic-{{ $epic->id }}" class="w-full max-w-lg">
     <div class="space-y-6" x-data="{
         title: {{ json_encode($epic->title) }},
         storyPoints: {{ $storyPoints ?? 'null' }},
+        estimatedPoints: {{ $estimatedPoints ?? 'null' }},
         statusId: '{{ $epic->status_id }}',
         categoryId: '{{ $epic->plan_category_id ?? '' }}',
         description: {{ json_encode($epic->description ?? '') }},
@@ -15,6 +22,7 @@
                 {{ $squadId }},
                 this.title,
                 this.storyPoints ? parseInt(this.storyPoints) : null,
+                this.estimatedPoints ? parseInt(this.estimatedPoints) : null,
                 this.statusId,
                 this.categoryId || null,
                 this.description
@@ -64,11 +72,37 @@
         </div>
 
         {{-- Story Points --}}
-        <flux:field>
-            <flux:label>Story Points for {{ $quarter }}</flux:label>
-            <flux:description>Points allocated for {{ $squadName }} this quarter only</flux:description>
-            <flux:input type="number" x-model="storyPoints" placeholder="e.g., 21" min="0" />
-        </flux:field>
+        <div class="grid grid-cols-2 gap-4">
+            <flux:field>
+                <flux:label>Total Estimate</flux:label>
+                <flux:description>{{ $squadName }}'s full effort</flux:description>
+                <flux:input type="number" x-model="estimatedPoints" placeholder="e.g., 35" min="0" />
+            </flux:field>
+            <flux:field>
+                <flux:label>This Quarter ({{ $quarter }})</flux:label>
+                <flux:description>Commitment for this quarter</flux:description>
+                <flux:input type="number" x-model="storyPoints" placeholder="e.g., 21" min="0" />
+            </flux:field>
+        </div>
+
+        {{-- Allocation context --}}
+        @if($committedOtherQuarters > 0 || ($estimatedPoints && $storyPoints))
+        <div class="bg-zinc-50 dark:bg-zinc-800/50 rounded-lg p-3 text-sm">
+            <div class="flex items-center justify-between text-zinc-600 dark:text-zinc-400">
+                <span>Other quarters:</span>
+                <span class="font-medium">{{ $committedOtherQuarters }} pts</span>
+            </div>
+            <div class="flex items-center justify-between text-zinc-600 dark:text-zinc-400 mt-1">
+                <span>This quarter:</span>
+                <span class="font-medium" x-text="storyPoints ? storyPoints + ' pts' : '–'"></span>
+            </div>
+            <div class="flex items-center justify-between border-t border-zinc-200 dark:border-zinc-700 mt-2 pt-2">
+                <span class="font-medium">Total committed:</span>
+                <span class="font-medium" x-text="({{ $committedOtherQuarters }} + (parseInt(storyPoints) || 0)) + ' / ' + (estimatedPoints || '?') + ' pts'"
+                      :class="estimatedPoints && ({{ $committedOtherQuarters }} + (parseInt(storyPoints) || 0)) > estimatedPoints ? 'text-red-600 dark:text-red-400' : ''"></span>
+            </div>
+        </div>
+        @endif
 
         {{-- Description --}}
         <flux:field>

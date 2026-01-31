@@ -11,7 +11,8 @@
 
 @php
     $borderColor = $planned ? 'border-green-200 dark:border-green-900' : 'border-zinc-200 dark:border-zinc-700';
-    $storyPoints = $planned ? ($epic->planned_story_points ?? 0) : ($epic->existing_story_points ?? null);
+    $committedPoints = $planned ? ($epic->planned_story_points ?? null) : ($epic->existing_story_points ?? null);
+    $estimatedPoints = $epic->estimated_story_points ?? null;
     $showConsideringToggle = !$planned && $isConsidering !== null;
 @endphp
 
@@ -54,7 +55,7 @@
         @endif
 
         {{-- Title --}}
-        <p class="font-medium text-sm truncate pr-8">{{ $epic->title }}</p>
+        <p class="font-medium text-sm truncate pr-8">{{ $epic->title }} {{ $epic->sort_order }}</p> 
 
         <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400 line-clamp-1 h-4">{{ $epic->description ?: '' }}</p>
 
@@ -85,13 +86,18 @@
                 @endif
 
                 @if($planned)
-                    @if($storyPoints)
-                    <flux:badge color="blue" size="sm">{{ $storyPoints }} pts</flux:badge>
+                    @if($committedPoints && $estimatedPoints && $committedPoints < $estimatedPoints)
+                        {{-- Partial commitment: show committed / total --}}
+                        <flux:badge color="amber" size="sm">{{ $committedPoints }} / {{ $estimatedPoints }} pts</flux:badge>
+                    @elseif($committedPoints)
+                        {{-- Full commitment or no estimate --}}
+                        <flux:badge color="blue" size="sm">{{ $committedPoints }} pts</flux:badge>
                     @else
-                    <flux:badge color="zinc" size="sm">– pts</flux:badge>
+                        <flux:badge color="zinc" size="sm">– pts</flux:badge>
                     @endif
                 @else
-                    <flux:badge color="{{ $storyPoints ? 'blue' : 'zinc' }}" size="sm">{{ $storyPoints ? $storyPoints . ' pts' : '– pts' }}</flux:badge>
+                    {{-- Backlog: show estimate (total) --}}
+                    <flux:badge color="{{ $estimatedPoints ? 'blue' : 'zinc' }}" size="sm">{{ $estimatedPoints ? $estimatedPoints . ' pts' : '– pts' }}</flux:badge>
                 @endif
             </div>
         </div>
@@ -101,7 +107,8 @@
     <x-planning.epic-modal
         :epic="$epic"
         :squadId="$squadId"
-        :storyPoints="$storyPoints"
+        :storyPoints="$committedPoints"
+        :estimatedPoints="$estimatedPoints"
         :statuses="$statuses"
         :categories="$categories"
         :quarter="$quarter"

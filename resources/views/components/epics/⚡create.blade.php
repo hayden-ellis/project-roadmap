@@ -52,7 +52,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 $this->squad_data[$squadId] = [
                     'start_date' => $this->start_date,
                     'end_date' => $this->end_date,
-                    'story_points' => 0,
+                    'estimated_story_points' => 25,
                 ];
             }
         }
@@ -73,7 +73,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             $this->squad_data[$squadId] = [
                 'start_date' => '',
                 'end_date' => '',
-                'story_points' => 0,
+                'estimated_story_points' => 25,
             ];
         }
 
@@ -122,13 +122,13 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         // Attach squads with pivot data
         $attachData = [];
         foreach ($this->squad_ids as $squadId) {
-            $storyPoints = $this->squad_data[$squadId]['story_points'] ?? '';
+            $estimatedPoints = $this->squad_data[$squadId]['estimated_story_points'] ?? '';
             $startDate = $this->squad_data[$squadId]['start_date'] ?? '';
             $endDate = $this->squad_data[$squadId]['end_date'] ?? '';
             $attachData[$squadId] = [
                 'start_date' => $startDate !== '' ? $startDate : null,
                 'end_date' => $endDate !== '' ? $endDate : null,
-                'story_points' => $storyPoints !== '' ? (int) $storyPoints : null,
+                'estimated_story_points' => $estimatedPoints !== '' && $estimatedPoints !== null ? (int) $estimatedPoints : null,
             ];
         }
 
@@ -291,19 +291,20 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                                 </div>
                                             </div>
                                             <div>
-                                                <flux:label class="text-xs">Story Points</flux:label>
-                                                <div class="flex items-center gap-3 -mt-1">
-                                                    <flux:slider 
-                                                        wire:model="squad_data.{{ $squad->id }}.story_points" 
-                                                        min="0" 
-                                                        max="250" 
-                                                        step="5" 
+                                                <flux:label class="text-xs">Total Estimate (Story Points)</flux:label>
+                                                <flux:description class="text-xs !mt-0 mb-1">{{ $squad->name }}'s full effort for this epic</flux:description>
+                                                <div class="flex items-center gap-3">
+                                                    <flux:slider
+                                                        wire:model="squad_data.{{ $squad->id }}.estimated_story_points"
+                                                        min="0"
+                                                        max="250"
+                                                        step="5"
                                                     />
-                                                    <flux:input 
-                                                        wire:model="squad_data.{{ $squad->id }}.story_points" 
-                                                        type="number" 
-                                                        size="sm" 
-                                                        class="max-w-20" 
+                                                    <flux:input
+                                                        wire:model="squad_data.{{ $squad->id }}.estimated_story_points"
+                                                        type="number"
+                                                        size="sm"
+                                                        class="max-w-20"
                                                     />
                                                 </div>
                                             </div>

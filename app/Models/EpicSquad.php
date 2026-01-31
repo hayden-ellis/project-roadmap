@@ -16,6 +16,7 @@ class EpicSquad extends Pivot
         'squad_id',
         'start_date',
         'end_date',
+        'estimated_story_points',
     ];
 
     protected function casts(): array

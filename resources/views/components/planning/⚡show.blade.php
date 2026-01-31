@@ -307,9 +307,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 'status',
                 'squads',
                 'category',
-                // Constrained eager load: only load quarter plans for this quarter/squad
-                'quarterPlans' => fn ($q) => $q->where('quarter', $selectedQuarter)
-                    ->where('squad_id', $squadId),
+                // Constrained eager load: load ALL quarter plans for this squad (needed for "other quarters" calculation in modal)
+                'quarterPlans' => fn ($q) => $q->where('squad_id', $squadId),
             ])
             ->whereHas('quarterPlans', function ($q) use ($squadId, $selectedQuarter) {
                 $q->where('squad_id', $squadId)
@@ -320,8 +319,12 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     ->where('eqp.squad_id', '=', $squadId)
                     ->where('eqp.quarter', '=', $selectedQuarter);
             })
+            ->join('epic_squad as es', function ($join) use ($squadId) {
+                $join->on('epics.id', '=', 'es.epic_id')
+                    ->where('es.squad_id', '=', $squadId);
+            })
             ->orderByRaw('eqp.sort_order IS NULL, eqp.sort_order ASC')
-            ->select('epics.*', 'eqp.story_points as planned_story_points', 'eqp.sort_order', 'eqp.category_id as plan_category_id')
+            ->select('epics.*', 'eqp.story_points as planned_story_points', 'eqp.sort_order', 'eqp.category_id as plan_category_id', 'es.estimated_story_points')
             ->get();
     }
 
@@ -338,6 +341,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             ->toArray();
 
         // Epics assigned to this squad but NOT in this quarter's plan
+        // Uses epic_squad dates (squad-specific timeline) for quarter overlap filtering
         $epics = $team->epics()
             ->with([
                 'status',
@@ -346,8 +350,9 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 // Constrained eager load: only load quarter plans for this squad
                 'quarterPlans' => fn ($q) => $q->where('squad_id', $squadId),
             ])
-            ->whereHas('squads', function ($q) use ($squadId) {
-                $q->where('squads.id', $squadId);
+            ->join('epic_squad as es', function ($join) use ($squadId) {
+                $join->on('epics.id', '=', 'es.epic_id')
+                    ->where('es.squad_id', '=', $squadId);
             })
             // Filter out epics already planned for this squad in this quarter
             ->whereDoesntHave('quarterPlans', function ($q) use ($squadId, $selectedQuarter) {
@@ -355,18 +360,19 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     ->where('quarter', $selectedQuarter);
             })
             ->where(function ($query) use ($quarterDates) {
-                // Either overlaps the quarter OR has no dates set
+                // Either squad assignment overlaps the quarter OR has no dates set
                 $query->where(function ($q) use ($quarterDates) {
-                    $q->whereNotNull('start_date')
-                        ->whereNotNull('end_date')
-                        ->where('start_date', '<=', $quarterDates['end'])
-                        ->where('end_date', '>=', $quarterDates['start']);
+                    $q->whereNotNull('es.start_date')
+                        ->whereNotNull('es.end_date')
+                        ->where('es.start_date', '<=', $quarterDates['end'])
+                        ->where('es.end_date', '>=', $quarterDates['start']);
                 })
                 ->orWhere(function ($q) {
-                    $q->whereNull('start_date')
-                        ->orWhereNull('end_date');
+                    $q->whereNull('es.start_date')
+                        ->orWhereNull('es.end_date');
                 });
             })
+            ->select('epics.*', 'es.start_date as squad_start_date', 'es.end_date as squad_end_date', 'es.estimated_story_points')
             ->get()
             ->map(function ($epic) use ($selectedQuarter, $consideringIds) {
                 // Get story points from any existing quarter plan for this squad
@@ -374,6 +380,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 $anyPlan = $epic->quarterPlans->first();
                 $epic->existing_story_points = $currentQuarterPlan?->story_points ?? $anyPlan?->story_points ?? null;
                 $epic->is_considering = in_array($epic->id, $consideringIds);
+                // estimated_story_points already selected from join
                 return $epic;
             })
             ->values();
@@ -547,14 +554,23 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 $epic->squads()->attach($squadId);
             }
 
-            // Check for existing story points from another quarter (to pre-fill)
-            $existingPlan = EpicQuarterPlan::where('epic_id', $epicId)
+            // Get estimated points from epic_squad pivot
+            $squadAssignment = $epic->squads()->where('squads.id', $squadId)->first();
+            $estimatedPoints = $squadAssignment?->pivot?->estimated_story_points;
+
+            // Calculate already committed points across all other quarters for this squad
+            $committedOtherQuarters = EpicQuarterPlan::where('epic_id', $epicId)
                 ->where('squad_id', $squadId)
-                ->whereNotNull('story_points')
-                ->first();
+                ->where('quarter', '!=', $this->selectedQuarter)
+                ->sum('story_points') ?? 0;
+
+            // Pre-fill with remaining points (estimate - already committed), or null if no estimate
+            $remainingPoints = null;
+            if ($estimatedPoints !== null) {
+                $remainingPoints = max(0, $estimatedPoints - $committedOtherQuarters);
+            }
 
             // Create quarter plan if doesn't exist (don't overwrite existing story_points)
-            // Use epic's category as initial plan category, copy story_points from other quarters
             EpicQuarterPlan::firstOrCreate(
                 [
                     'epic_id' => $epicId,
@@ -563,7 +579,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 ],
                 [
                     'category_id' => $epic->category_id,
-                    'story_points' => $existingPlan?->story_points,
+                    'story_points' => $remainingPoints,
                 ]
             );
         }
@@ -596,7 +612,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             ->update(['story_points' => $storyPoints]);
     }
 
-    public function updateEpicFromPopover(int $epicId, int $squadId, $title, $storyPoints, $statusId, $categoryId, $description): void
+    public function updateEpicFromPopover(int $epicId, int $squadId, $title, $storyPoints, $estimatedPoints, $statusId, $categoryId, $description): void
     {
         $epic = Epic::findOrFail($epicId);
         $this->authorizeEpic($epic);
@@ -608,8 +624,14 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             'description' => $description ?: null,
         ]);
 
-        // Only update quarter plan if one already exists (don't auto-add backlog epics to plan)
+        // Update squad assignment with estimated points
         if (in_array($squadId, $this->selectedSquadIds)) {
+            $estimatedPoints = $estimatedPoints !== '' && $estimatedPoints !== null ? (int) $estimatedPoints : null;
+            $epic->squads()->updateExistingPivot($squadId, [
+                'estimated_story_points' => $estimatedPoints,
+            ]);
+
+            // Only update quarter plan if one already exists (don't auto-add backlog epics to plan)
             $quarterPlan = EpicQuarterPlan::where('epic_id', $epicId)
                 ->where('squad_id', $squadId)
                 ->where('quarter', $this->selectedQuarter)
@@ -765,18 +787,28 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
         // Add to quarter plan if not already in this quarter
         if (! $quarterPlan) {
-            // Check for existing story points from another quarter (to pre-fill)
-            $existingPlan = EpicQuarterPlan::where('epic_id', $epicId)
+            // Get estimated points from epic_squad pivot
+            $squadAssignment = $epic->squads()->where('squads.id', $squadId)->first();
+            $estimatedPoints = $squadAssignment?->pivot?->estimated_story_points;
+
+            // Calculate already committed points across all other quarters for this squad
+            $committedOtherQuarters = EpicQuarterPlan::where('epic_id', $epicId)
                 ->where('squad_id', $squadId)
-                ->whereNotNull('story_points')
-                ->first();
+                ->where('quarter', '!=', $this->selectedQuarter)
+                ->sum('story_points') ?? 0;
+
+            // Pre-fill with remaining points (estimate - already committed), or null if no estimate
+            $remainingPoints = null;
+            if ($estimatedPoints !== null) {
+                $remainingPoints = max(0, $estimatedPoints - $committedOtherQuarters);
+            }
 
             $quarterPlan = EpicQuarterPlan::create([
                 'epic_id' => $epicId,
                 'category_id' => $categoryId,
                 'squad_id' => $squadId,
                 'quarter' => $this->selectedQuarter,
-                'story_points' => $existingPlan?->story_points,
+                'story_points' => $remainingPoints,
             ]);
         }
 

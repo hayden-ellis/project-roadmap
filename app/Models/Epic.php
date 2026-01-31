@@ -49,7 +49,7 @@ class Epic extends Model
     {
         return $this->belongsToMany(Squad::class, 'epic_squad')
             ->using(EpicSquad::class)
-            ->withPivot('start_date', 'end_date')
+            ->withPivot('start_date', 'end_date', 'estimated_story_points')
             ->withTimestamps();
     }
 
