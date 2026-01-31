@@ -28,7 +28,7 @@ trait Sortable
     public function move($position)
     {
         // Occasionally clean up gaps (2 in 10 chance)
-        Lottery::odds(2, outOf: 10)
+        Lottery::odds(1, outOf: 4)
             ->winner(fn () => $this->arrange())
             ->choose();
 
