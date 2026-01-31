@@ -613,27 +613,20 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             'description' => $description ?: null,
         ]);
 
-        // Update or create quarter plan for this specific quarter
-        // This allows editing backlog epics (creates plan) or planned epics (updates plan)
+        // Only update quarter plan if one already exists (don't auto-add backlog epics to plan)
         if (in_array($squadId, $this->selectedSquadIds)) {
-            $storyPoints = $storyPoints !== '' && $storyPoints !== null ? (int) $storyPoints : null;
+            $quarterPlan = EpicQuarterPlan::where('epic_id', $epicId)
+                ->where('squad_id', $squadId)
+                ->where('quarter', $this->selectedQuarter)
+                ->first();
 
-            // Ensure squad assignment exists
-            if (! $epic->squads()->where('squads.id', $squadId)->exists()) {
-                $epic->squads()->attach($squadId);
-            }
-
-            EpicQuarterPlan::updateOrCreate(
-                [
-                    'epic_id' => $epicId,
-                    'squad_id' => $squadId,
-                    'quarter' => $this->selectedQuarter,
-                ],
-                [
+            if ($quarterPlan) {
+                $storyPoints = $storyPoints !== '' && $storyPoints !== null ? (int) $storyPoints : null;
+                $quarterPlan->update([
                     'story_points' => $storyPoints,
                     'category_id' => $categoryId ?: null,
-                ]
-            );
+                ]);
+            }
         }
     }
 

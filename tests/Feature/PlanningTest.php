@@ -1711,7 +1711,7 @@ it('cannot toggle consideration for epic from another team', function () {
         ->assertForbidden();
 });
 
-it('can edit backlog epic via popover and creates quarter plan', function () {
+it('can edit backlog epic via popover without adding to plan', function () {
     $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
 
     $epic = Epic::factory()
@@ -1742,12 +1742,10 @@ it('can edit backlog epic via popover and creates quarter plan', function () {
     expect($epic->title)->toBe('Updated Title')
         ->and($epic->description)->toBe('New description');
 
-    // Quarter plan should now exist with category and story points
-    $this->assertDatabaseHas('epic_quarter_plans', [
+    // Quarter plan should NOT exist (backlog epics stay in backlog until explicitly added)
+    $this->assertDatabaseMissing('epic_quarter_plans', [
         'epic_id' => $epic->id,
         'squad_id' => $this->squad->id,
         'quarter' => 'Q1-2026',
-        'story_points' => 15,
-        'category_id' => $category->id,
     ]);
 });
