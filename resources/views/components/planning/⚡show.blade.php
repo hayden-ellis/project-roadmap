@@ -4,6 +4,7 @@ use App\Models\Category;
 use App\Models\Epic;
 use App\Models\EpicQuarterPlan;
 use App\Models\QuarterPlan;
+use App\Models\QuarterPlanCategory;
 use App\Models\Status;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -601,6 +602,67 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->capacityExpanded = ! $this->capacityExpanded;
     }
 
+    public function addCategoryToPlan(int $categoryId, int $squadId): void
+    {
+        if (! in_array($squadId, $this->selectedSquadIds)) {
+            return;
+        }
+
+        $plan = $this->quarterPlans[$squadId] ?? null;
+        if (! $plan) {
+            return;
+        }
+
+        // Check category belongs to team
+        $category = Auth::user()->currentTeam->categories()->find($categoryId);
+        if (! $category) {
+            return;
+        }
+
+        // Add category to plan if not already added
+        if (! $plan->categories()->where('category_id', $categoryId)->exists()) {
+            QuarterPlanCategory::create([
+                'quarter_plan_id' => $plan->id,
+                'category_id' => $categoryId,
+                'allocated_story_points' => 0,
+            ]);
+        }
+    }
+
+    public function removeCategoryFromPlan(int $categoryId, int $squadId): void
+    {
+        if (! in_array($squadId, $this->selectedSquadIds)) {
+            return;
+        }
+
+        $plan = $this->quarterPlans[$squadId] ?? null;
+        if (! $plan) {
+            return;
+        }
+
+        $plan->categories()->detach($categoryId);
+    }
+
+    public function sortCategory(int $categoryId, int $position, int $squadId): void
+    {
+        if (! in_array($squadId, $this->selectedSquadIds)) {
+            return;
+        }
+
+        $plan = $this->quarterPlans[$squadId] ?? null;
+        if (! $plan) {
+            return;
+        }
+
+        $pivotRecord = QuarterPlanCategory::where('quarter_plan_id', $plan->id)
+            ->where('category_id', $categoryId)
+            ->first();
+
+        if ($pivotRecord) {
+            $pivotRecord->move($position);
+        }
+    }
+
     public function sort($item, $position, $column, $squadId = null): void
     {
         $squadId = $squadId ?? $this->selectedSquadIds[0] ?? null;
@@ -708,8 +770,26 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             ];
         }
 
-        $categories = Auth::user()->currentTeam->categories()->ordered()->get();
+        $allCategories = Auth::user()->currentTeam->categories()->ordered()->get();
         $statuses = Status::orderBy('order')->get();
+
+        // Get plan categories for single squad view (ordered by sort_order)
+        $planCategories = collect();
+        $availableCategoriesForPlan = collect();
+        if (! $isMultiSquadView && ! empty($this->selectedSquadIds)) {
+            $singleSquadId = $this->selectedSquadIds[0];
+            $plan = $this->quarterPlans[$singleSquadId] ?? null;
+            if ($plan) {
+                // Refresh the plan's categories to get updated sort_order
+                $plan->load('categories');
+                $planCategories = $plan->categories;
+                $planCategoryIds = $planCategories->pluck('id')->toArray();
+                $availableCategoriesForPlan = $allCategories->whereNotIn('id', $planCategoryIds);
+            }
+        }
+
+        // Use plan categories if any are selected, otherwise fall back to all categories
+        $categories = $planCategories->isNotEmpty() ? $planCategories : $allCategories;
 
         return [
             'squads' => $squads,
@@ -721,6 +801,9 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             'availableQuarters' => $this->getAvailableQuarters(),
             'isMultiSquadView' => $isMultiSquadView,
             'categories' => $categories,
+            'allCategories' => $allCategories,
+            'planCategories' => $planCategories,
+            'availableCategoriesForPlan' => $availableCategoriesForPlan,
             'statuses' => $statuses,
             'categoryTargets' => $this->categoryTargets,
             'capacityExpanded' => $this->capacityExpanded,
@@ -1195,8 +1278,44 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 </flux:card>
             </div>
 
+            {{-- Category Management Header --}}
+            @if($availableCategoriesForPlan->isNotEmpty() || $planCategories->isNotEmpty())
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2">
+                    @if($planCategories->isNotEmpty())
+                    <flux:text class="text-sm text-zinc-500">{{ $planCategories->count() }} categories selected</flux:text>
+                    <flux:text class="text-xs text-zinc-400">(drag to reorder)</flux:text>
+                    @else
+                    <flux:text class="text-sm text-zinc-500">Showing all categories</flux:text>
+                    @endif
+                </div>
+                @if($availableCategoriesForPlan->isNotEmpty())
+                <flux:dropdown>
+                    <flux:button variant="ghost" size="sm" icon="plus">Add Category</flux:button>
+                    <flux:menu>
+                        @foreach($availableCategoriesForPlan as $availableCategory)
+                        <flux:menu.item wire:click="addCategoryToPlan({{ $availableCategory->id }}, {{ $singleSquadId }})">
+                            <div class="flex items-center gap-2">
+                                <div class="h-2 w-2 rounded" style="background-color: {{ $availableCategory->color }}"></div>
+                                {{ $availableCategory->name }}
+                            </div>
+                        </flux:menu.item>
+                        @endforeach
+                    </flux:menu>
+                </flux:dropdown>
+                @endif
+            </div>
+            @endif
+
             {{-- Category Columns for Planned Items --}}
-            <flux:kanban class="[&>[data-flux-kanban-column]]:flex-1">
+            @php $canSortCategories = $planCategories->isNotEmpty(); @endphp
+            <div
+                class="flex gap-4 overflow-x-auto [&>[data-flux-kanban-column]]:flex-1"
+                @if($canSortCategories)
+                x-sort="$wire.sortCategory($item, $position, {{ $singleSquadId }})"
+                x-sort:group="category-columns-{{ $singleSquadId }}"
+                @endif
+            >
                 @foreach($categories as $category)
                     @php
                         $categoryEpics = $plannedByCategory->get($category->id, collect());
@@ -1205,18 +1324,33 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                         $isOver = $target > 0 && $categoryPoints > $target;
                     @endphp
 
-                    <flux:kanban.column class="flex-1 w-auto max-w-none">
-                        <flux:kanban.column.header>
+                    <div
+                        class="flex-1 min-w-[280px]"
+                        @if($canSortCategories) x-sort:item="{{ $category->id }}" @endif
+                    >
+                        <div class="group/header {{ $canSortCategories ? 'cursor-grab active:cursor-grabbing' : '' }} px-2 pb-2 font-medium text-sm text-zinc-700 dark:text-zinc-300">
                             <div class="flex items-center gap-2 w-full">
                                 <div class="h-3 w-3 rounded" style="background-color: {{ $category->color }}"></div>
                                 <span class="font-medium">{{ $category->name }}</span>
                                 <flux:badge :color="$isOver ? 'red' : 'zinc'" size="sm">
                                     {{ $categoryPoints }}{{ $target ? "/$target" : '' }} pts
                                 </flux:badge>
+                                @if($canSortCategories)
+                                <button
+                                    type="button"
+                                    wire:click="removeCategoryFromPlan({{ $category->id }}, {{ $singleSquadId }})"
+                                    wire:confirm="Remove '{{ $category->name }}' from this plan? Epics in this category will move to Uncategorized."
+                                    class="ml-auto opacity-0 group-hover/header:opacity-100 p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-opacity"
+                                    title="Remove category from plan"
+                                >
+                                    <flux:icon.x-mark variant="micro" />
+                                </button>
+                                @endif
                             </div>
-                        </flux:kanban.column.header>
+                        </div>
 
-                        <flux:kanban.column.cards
+                        <div
+                            class="px-2 pb-2 flex flex-col gap-2"
                             x-sort="$wire.sort($item, $position, {{ $category->id }}, {{ $singleSquadId }})"
                             x-sort:group="planning-{{ $singleSquadId }}"
                         >
@@ -1226,30 +1360,31 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                     :squadId="$singleSquadId"
                                     :planned="true"
                                     :statuses="$statuses"
-                                    :categories="$categories"
+                                    :categories="$allCategories"
                                     :quarter="$this->selectedQuarter"
                                     :squadName="$singleSquadName"
                                 />
                             @empty
                                 <div class="min-h-[100px] border-2 border-dashed border-zinc-300 dark:border-zinc-600 rounded-lg"></div>
                             @endforelse
-                        </flux:kanban.column.cards>
-                    </flux:kanban.column>
+                        </div>
+                    </div>
                 @endforeach
 
                 {{-- Uncategorized Column --}}
                 @php $uncategorized = $plannedByCategory->get('uncategorized', collect()); @endphp
                 @if($uncategorized->isNotEmpty() || $categories->isEmpty())
-                    <flux:kanban.column class="flex-1 w-auto max-w-none">
-                        <flux:kanban.column.header>
+                    <div class="flex-1 min-w-[280px]">
+                        <div class="px-2 pb-2 font-medium text-sm text-zinc-700 dark:text-zinc-300">
                             <div class="flex items-center gap-2">
                                 <flux:icon.question-mark-circle variant="micro" class="text-zinc-400" />
                                 <span class="font-medium text-zinc-500">Uncategorized</span>
                                 <flux:badge color="zinc" size="sm">{{ $uncategorized->sum('planned_story_points') }} pts</flux:badge>
                             </div>
-                        </flux:kanban.column.header>
+                        </div>
 
-                        <flux:kanban.column.cards
+                        <div
+                            class="px-2 pb-2 flex flex-col gap-2"
                             x-sort="$wire.sort($item, $position, 'uncategorized', {{ $singleSquadId }})"
                             x-sort:group="planning-{{ $singleSquadId }}"
                         >
@@ -1259,17 +1394,17 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                     :squadId="$singleSquadId"
                                     :planned="true"
                                     :statuses="$statuses"
-                                    :categories="$categories"
+                                    :categories="$allCategories"
                                     :quarter="$this->selectedQuarter"
                                     :squadName="$singleSquadName"
                                 />
                             @empty
                                 <div class="min-h-[100px] border-2 border-dashed border-zinc-300 dark:border-zinc-600 rounded-lg"></div>
                             @endforelse
-                        </flux:kanban.column.cards>
-                    </flux:kanban.column>
+                        </div>
+                    </div>
                 @endif
-            </flux:kanban>
+            </div>
 
             {{-- Backlog Section (Below) --}}
             <div class="mt-6 border-t border-zinc-200 dark:border-zinc-700 pt-6">

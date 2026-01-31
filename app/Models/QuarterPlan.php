@@ -41,7 +41,9 @@ class QuarterPlan extends Model
     public function categories(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
     {
         return $this->belongsToMany(Category::class, 'quarter_plan_categories')
-            ->withPivot('allocated_story_points')
+            ->using(QuarterPlanCategory::class)
+            ->withPivot('allocated_story_points', 'sort_order')
+            ->orderByPivot('sort_order')
             ->withTimestamps();
     }
 

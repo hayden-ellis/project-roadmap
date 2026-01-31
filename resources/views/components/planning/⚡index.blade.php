@@ -5,9 +5,20 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
+use Flux\Flux;
 
 new #[Layout('components.layouts.app.sidebar')] class extends Component
 {
+    public function deletePlan(int $planId): void
+    {
+        $plan = QuarterPlan::where('team_id', Auth::user()->currentTeam->id)
+            ->findOrFail($planId);
+
+        $plan->delete();
+
+        Flux::toast('Plan deleted successfully.');
+    }
+
     public function with(): array
     {
         $team = Auth::user()->currentTeam;
@@ -81,25 +92,34 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     $plan = $item['plan'];
                     $squad = $plan->squad;
                 @endphp
-                <flux:card href="/planning/{{ $plan->id }}" wire:navigate class="hover:shadow-lg transition-shadow cursor-pointer p-4 {{ $item['is_over_allocated'] ? 'border-l-4 border-red-500' : '' }}" data-plan-id="{{ $plan->id }}">
+                <flux:card class="p-4 {{ $item['is_over_allocated'] ? 'border-l-4 border-red-500' : '' }}" data-plan-id="{{ $plan->id }}">
                     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <div class="flex items-center gap-3">
+                        <a href="/planning/{{ $plan->id }}" wire:navigate class="flex items-center gap-3 hover:opacity-80 transition-opacity flex-1">
                             <div class="h-3 w-3 rounded-full" style="background-color: {{ $squad->color }}"></div>
                             <flux:heading size="base">{{ $squad->name }}</flux:heading>
                             @if($item['is_over_allocated'])
                             <flux:badge color="red" size="sm">Over-allocated</flux:badge>
                             @endif
-                        </div>
-                        <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-sm">
-                            <flux:text class="text-zinc-600 dark:text-zinc-400">
-                                <span class="font-medium">{{ $plan->available_story_points }}</span> available
-                            </flux:text>
-                            <flux:text class="text-zinc-600 dark:text-zinc-400">
-                                <span class="font-medium">{{ $item['allocated_points'] }}</span> allocated
-                            </flux:text>
-                            <flux:text class="{{ $item['remaining_points'] < 0 ? 'text-red-600 dark:text-red-400' : 'text-zinc-600 dark:text-zinc-400' }}">
-                                <span class="font-medium">{{ $item['remaining_points'] }}</span> remaining
-                            </flux:text>
+                        </a>
+                        <div class="flex items-center gap-4">
+                            <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-sm">
+                                <flux:text class="text-zinc-600 dark:text-zinc-400">
+                                    <span class="font-medium">{{ $plan->available_story_points }}</span> available
+                                </flux:text>
+                                <flux:text class="text-zinc-600 dark:text-zinc-400">
+                                    <span class="font-medium">{{ $item['allocated_points'] }}</span> allocated
+                                </flux:text>
+                                <flux:text class="{{ $item['remaining_points'] < 0 ? 'text-red-600 dark:text-red-400' : 'text-zinc-600 dark:text-zinc-400' }}">
+                                    <span class="font-medium">{{ $item['remaining_points'] }}</span> remaining
+                                </flux:text>
+                            </div>
+                            <flux:dropdown>
+                                <flux:button variant="ghost" size="sm" icon="ellipsis-horizontal" />
+                                <flux:menu>
+                                    <flux:menu.item href="/planning/{{ $plan->id }}" wire:navigate icon="pencil">Edit</flux:menu.item>
+                                    <flux:menu.item variant="danger" icon="trash" wire:click="deletePlan({{ $plan->id }})" wire:confirm="Are you sure you want to delete this plan? This will also remove all epic allocations for this squad in {{ $plan->getQuarterString() }}.">Delete</flux:menu.item>
+                                </flux:menu>
+                            </flux:dropdown>
                         </div>
                     </div>
                 </flux:card>
