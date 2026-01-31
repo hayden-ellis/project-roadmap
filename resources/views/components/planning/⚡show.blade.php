@@ -334,11 +334,13 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $selectedQuarter = $this->selectedQuarter;
         $quarterDates = QuarterPlan::getQuarterDates($selectedQuarter);
 
-        // Get IDs of epics being considered for this quarter
-        $consideringIds = BacklogConsideration::where('squad_id', $squadId)
+        // Get consideration records with sort_order (already ordered by Sortable trait's global scope)
+        $considerations = BacklogConsideration::where('squad_id', $squadId)
             ->where('quarter', $selectedQuarter)
-            ->pluck('epic_id')
-            ->toArray();
+            ->get()
+            ->keyBy('epic_id');
+
+        $consideringIds = $considerations->keys()->toArray();
 
         // Epics assigned to this squad but NOT in this quarter's plan
         // Uses epic_squad dates (squad-specific timeline) for quarter overlap filtering
@@ -374,20 +376,24 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             })
             ->select('epics.*', 'es.start_date as squad_start_date', 'es.end_date as squad_end_date', 'es.estimated_story_points')
             ->get()
-            ->map(function ($epic) use ($selectedQuarter, $consideringIds) {
+            ->map(function ($epic) use ($selectedQuarter, $consideringIds, $considerations) {
                 // Get story points from any existing quarter plan for this squad
                 $currentQuarterPlan = $epic->quarterPlans->where('quarter', $selectedQuarter)->first();
                 $anyPlan = $epic->quarterPlans->first();
                 $epic->existing_story_points = $currentQuarterPlan?->story_points ?? $anyPlan?->story_points ?? null;
                 $epic->is_considering = in_array($epic->id, $consideringIds);
+                // Add sort_order for considering items
+                $epic->consideration_sort_order = $considerations->get($epic->id)?->sort_order ?? 0;
                 // estimated_story_points already selected from join
                 return $epic;
             })
             ->values();
 
-        // Split into considering and other
+        // Split into considering (sorted by sort_order) and other
         return [
-            'considering' => $epics->filter(fn ($e) => $e->is_considering)->values(),
+            'considering' => $epics->filter(fn ($e) => $e->is_considering)
+                ->sortBy('consideration_sort_order')
+                ->values(),
             'other' => $epics->filter(fn ($e) => ! $e->is_considering)->values(),
         ];
     }
@@ -753,25 +759,29 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 $quarterPlan->delete();
             }
 
-            // Toggle consideration based on target column
-            $isCurrentlyConsidering = BacklogConsideration::where('epic_id', $epicId)
+            // Find existing consideration record
+            $consideration = BacklogConsideration::where('epic_id', $epicId)
                 ->where('squad_id', $squadId)
                 ->where('quarter', $this->selectedQuarter)
-                ->exists();
+                ->first();
 
-            if ($column === 'considering' && ! $isCurrentlyConsidering) {
-                // Add to considering
-                BacklogConsideration::create([
-                    'epic_id' => $epicId,
-                    'squad_id' => $squadId,
-                    'quarter' => $this->selectedQuarter,
-                ]);
-            } elseif ($column === 'other-backlog' && $isCurrentlyConsidering) {
+            if ($column === 'considering') {
+                if ($consideration) {
+                    // Already considering - just move to new position
+                    $consideration->move($position);
+                } else {
+                    // Add to considering (Sortable trait auto-assigns sort_order)
+                    $consideration = BacklogConsideration::create([
+                        'epic_id' => $epicId,
+                        'squad_id' => $squadId,
+                        'quarter' => $this->selectedQuarter,
+                    ]);
+                    // Move to specified position after creation
+                    $consideration->move($position);
+                }
+            } elseif ($column === 'other-backlog' && $consideration) {
                 // Remove from considering
-                BacklogConsideration::where('epic_id', $epicId)
-                    ->where('squad_id', $squadId)
-                    ->where('quarter', $this->selectedQuarter)
-                    ->delete();
+                $consideration->delete();
             }
 
             return;
@@ -1558,7 +1568,11 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                             x-sort:group="planning-{{ $singleSquadId }}"
                         >
                             @foreach($consideringEpics as $epic)
-                                <div class="w-96 shrink-0">
+                                <div
+                                    class="w-96 shrink-0"
+                                    x-sort:item="{{ $epic->id }}"
+                                    wire:key="considering-{{ $epic->id }}"
+                                >
                                     <x-planning.kanban-card
                                         :$epic
                                         :squadId="$singleSquadId"
@@ -1567,6 +1581,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                         :categories="$allCategories"
                                         :quarter="$this->selectedQuarter"
                                         :squadName="$singleSquadName"
+                                        :sortable="false"
                                     />
                                 </div>
                             @endforeach
@@ -1606,7 +1621,11 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                             x-sort:group="planning-{{ $singleSquadId }}"
                         >
                             @foreach($otherBacklogEpics as $epic)
-                                <div class="w-96 shrink-0">
+                                <div
+                                    class="w-96 shrink-0"
+                                    x-sort:item="{{ $epic->id }}"
+                                    wire:key="other-backlog-{{ $epic->id }}"
+                                >
                                     <x-planning.kanban-card
                                         :$epic
                                         :squadId="$singleSquadId"
@@ -1615,6 +1634,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                         :categories="$allCategories"
                                         :quarter="$this->selectedQuarter"
                                         :squadName="$singleSquadName"
+                                        :sortable="false"
                                     />
                                 </div>
                             @endforeach

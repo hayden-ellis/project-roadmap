@@ -7,6 +7,7 @@
     'quarter' => null,
     'squadName' => null,
     'isConsidering' => null,
+    'sortable' => true,
 ])
 
 @php
@@ -17,7 +18,7 @@
 @endphp
 
 <div
-    x-sort:item="{{ $epic->id }}"
+    @if($sortable) x-sort:item="{{ $epic->id }}" @endif
     wire:key="{{ $planned ? 'planned' : 'backlog' }}-{{ $epic->id }}"
     wire:transition
 >
@@ -55,7 +56,7 @@
         @endif
 
         {{-- Title --}}
-        <p class="font-medium text-sm truncate pr-8">{{ $epic->title }} {{ $epic->sort_order }}</p> 
+        <p class="font-medium text-sm truncate pr-8">{{ $epic->title }}</p> 
 
         <p class="mt-1 text-xs text-zinc-500 dark:text-zinc-400 line-clamp-1 h-4">{{ $epic->description ?: '' }}</p>
 
