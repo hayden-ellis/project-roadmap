@@ -328,6 +328,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 $quarterPlan = $epic->quarterPlans->first();
                 $epic->planned_story_points = $quarterPlan->story_points ?? null;
                 $epic->sort_order = $quarterPlan->sort_order ?? null;
+                // Use plan's category for grouping (not epic's global category)
+                $epic->plan_category_id = $quarterPlan->category_id ?? null;
 
                 return $epic;
             });
@@ -518,6 +520,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             }
 
             // Create quarter plan (or update if exists)
+            // Use epic's category as initial plan category
             EpicQuarterPlan::updateOrCreate(
                 [
                     'epic_id' => $epicId,
@@ -525,6 +528,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     'quarter' => $this->selectedQuarter,
                 ],
                 [
+                    'category_id' => $epic->category_id,
                     'story_points' => null,
                 ]
             );
@@ -563,21 +567,23 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $epic = Epic::findOrFail($epicId);
         $this->authorizeEpic($epic);
 
-        // Update epic fields
+        // Update epic fields (category is now per-plan, not per-epic)
         $epic->update([
             'title' => $title,
             'status_id' => $statusId,
-            'category_id' => $categoryId ?: null,
             'description' => $description ?: null,
         ]);
 
-        // Update story points on the quarter plan for this specific quarter
+        // Update story points and category on the quarter plan for this specific quarter
         if (in_array($squadId, $this->selectedSquadIds)) {
             $storyPoints = $storyPoints !== '' && $storyPoints !== null ? (int) $storyPoints : null;
             EpicQuarterPlan::where('epic_id', $epicId)
                 ->where('squad_id', $squadId)
                 ->where('quarter', $this->selectedQuarter)
-                ->update(['story_points' => $storyPoints]);
+                ->update([
+                    'story_points' => $storyPoints,
+                    'category_id' => $categoryId ?: null,
+                ]);
         }
     }
 
@@ -697,11 +703,6 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         // Column is a category ID (or 'uncategorized')
         $categoryId = $column === 'uncategorized' ? null : (int) $column;
 
-        // Update epic's category if changed
-        if ($epic->category_id !== $categoryId) {
-            $epic->update(['category_id' => $categoryId]);
-        }
-
         // Ensure squad assignment exists
         if (! $epic->squads()->where('squads.id', $squadId)->exists()) {
             $epic->squads()->attach($squadId);
@@ -711,10 +712,16 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         if (! $quarterPlan) {
             $quarterPlan = EpicQuarterPlan::create([
                 'epic_id' => $epicId,
+                'category_id' => $categoryId,
                 'squad_id' => $squadId,
                 'quarter' => $this->selectedQuarter,
                 'story_points' => null,
             ]);
+        }
+
+        // Update plan's category if changed (category is per-plan, not per-epic)
+        if ($quarterPlan->category_id !== $categoryId) {
+            $quarterPlan->update(['category_id' => $categoryId]);
         }
 
         $quarterPlan->move($position);
@@ -1112,8 +1119,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 $backlogEpics = $data['backlog_epics'] ?? collect();
                 $plannedEpics = $data['planned_epics'] ?? collect();
 
-                // Group planned epics by category
-                $plannedByCategory = $plannedEpics->groupBy(fn($e) => $e->category_id ?? 'uncategorized');
+                // Group planned epics by plan's category (not epic's global category)
+                $plannedByCategory = $plannedEpics->groupBy(fn($e) => $e->plan_category_id ?? 'uncategorized');
 
                 // Calculate category data
                 $categoryData = [];
@@ -1354,7 +1361,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                             x-sort="$wire.sort($item, $position, {{ $category->id }}, {{ $singleSquadId }})"
                             x-sort:group="planning-{{ $singleSquadId }}"
                         >
-                            @forelse($categoryEpics as $epic)
+                            @foreach($categoryEpics as $epic)
                                 <x-planning.kanban-card
                                     :epic="$epic"
                                     :squadId="$singleSquadId"
@@ -1364,9 +1371,11 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                     :quarter="$this->selectedQuarter"
                                     :squadName="$singleSquadName"
                                 />
-                            @empty
-                                <div class="min-h-[100px] border-2 border-dashed border-zinc-300 dark:border-zinc-600 rounded-lg"></div>
-                            @endforelse
+                            @endforeach
+                            {{-- Show one placeholder for the next slot (up to 3 total) --}}
+                            @if($categoryEpics->count() < 3)
+                            <div class="min-h-[100px] border-2 border-dashed border-zinc-300 dark:border-zinc-600 rounded-lg"></div>
+                            @endif
                         </div>
                     </div>
                 @endforeach
@@ -1388,7 +1397,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                             x-sort="$wire.sort($item, $position, 'uncategorized', {{ $singleSquadId }})"
                             x-sort:group="planning-{{ $singleSquadId }}"
                         >
-                            @forelse($uncategorized as $epic)
+                            @foreach($uncategorized as $epic)
                                 <x-planning.kanban-card
                                     :epic="$epic"
                                     :squadId="$singleSquadId"
@@ -1398,9 +1407,11 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                     :quarter="$this->selectedQuarter"
                                     :squadName="$singleSquadName"
                                 />
-                            @empty
-                                <div class="min-h-[100px] border-2 border-dashed border-zinc-300 dark:border-zinc-600 rounded-lg"></div>
-                            @endforelse
+                            @endforeach
+                            {{-- Show one placeholder for the next slot (up to 3 total) --}}
+                            @if($uncategorized->count() < 3)
+                            <div class="min-h-[100px] border-2 border-dashed border-zinc-300 dark:border-zinc-600 rounded-lg"></div>
+                            @endif
                         </div>
                     </div>
                 @endif

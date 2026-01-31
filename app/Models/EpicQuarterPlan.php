@@ -13,6 +13,7 @@ class EpicQuarterPlan extends Model
 
     protected $fillable = [
         'epic_id',
+        'category_id',
         'squad_id',
         'quarter',
         'story_points',
@@ -28,12 +29,18 @@ class EpicQuarterPlan extends Model
     }
 
     /**
-     * Sortable scope: order within squad + quarter.
+     * Sortable scope: order within squad + quarter + category.
      */
     public function scopeSortable($query, $model): mixed
     {
         return $query->where('squad_id', $model->squad_id)
-                     ->where('quarter', $model->quarter);
+                     ->where('quarter', $model->quarter)
+                     ->where('category_id', $model->category_id);
+    }
+
+    public function category(): BelongsTo
+    {
+        return $this->belongsTo(Category::class);
     }
 
     public function epic(): BelongsTo

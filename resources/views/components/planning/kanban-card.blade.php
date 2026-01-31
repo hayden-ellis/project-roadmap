@@ -59,7 +59,8 @@
             <div class="flex flex-wrap items-center gap-1.5">
                 <x-planning.status-badge :status="$epic->status" />
 
-                @if($epic->category)
+                {{-- Show category badge only for backlog items (planned items are already in category columns) --}}
+                @if(!$planned && $epic->category)
                 <x-planning.category-badge :category="$epic->category" />
                 @endif
             </div>

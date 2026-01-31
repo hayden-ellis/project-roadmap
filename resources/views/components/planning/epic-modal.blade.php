@@ -5,7 +5,7 @@
         title: {{ json_encode($epic->title) }},
         storyPoints: {{ $storyPoints ?? 'null' }},
         statusId: '{{ $epic->status_id }}',
-        categoryId: '{{ $epic->category_id ?? '' }}',
+        categoryId: '{{ $epic->plan_category_id ?? '' }}',
         description: {{ json_encode($epic->description ?? '') }},
         saving: false,
         save() {
@@ -53,9 +53,9 @@
                 </flux:select>
             </flux:field>
             <flux:field>
-                <flux:label>Category</flux:label>
+                <flux:label>Category (this plan)</flux:label>
                 <flux:select x-model="categoryId">
-                    <flux:select.option value="">None</flux:select.option>
+                    <flux:select.option value="">Uncategorized</flux:select.option>
                     @foreach($categories as $category)
                         <flux:select.option value="{{ $category->id }}">{{ $category->name }}</flux:select.option>
                     @endforeach
