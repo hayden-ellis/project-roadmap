@@ -46,6 +46,114 @@ it('defaults to current quarter', function () {
     expect($availableQuarters[0])->toBe($selectedQuarter);
 });
 
+it('persists selected squads in URL query string', function () {
+    $squad2 = Squad::factory()->for($this->team)->create();
+
+    Livewire::withQueryParams(['squads' => [$this->squad->id, $squad2->id]])
+        ->test('planning.show', ['plan' => null])
+        ->assertSet('selectedSquadIds', [$this->squad->id, $squad2->id]);
+});
+
+it('persists selected quarter in URL query string', function () {
+    Livewire::withQueryParams(['quarter' => 'Q3-2026'])
+        ->test('planning.show', ['plan' => null])
+        ->assertSet('selectedQuarter', 'Q3-2026');
+});
+
+it('persists both quarter and squads from URL', function () {
+    $squad2 = Squad::factory()->for($this->team)->create();
+
+    Livewire::withQueryParams([
+        'quarter' => 'Q2-2026',
+        'squads' => [$this->squad->id, $squad2->id],
+    ])
+        ->test('planning.show', ['plan' => null])
+        ->assertSet('selectedQuarter', 'Q2-2026')
+        ->assertSet('selectedSquadIds', [$this->squad->id, $squad2->id]);
+});
+
+it('loads quarter plans when squads provided via URL', function () {
+    $quarterPlan = QuarterPlan::factory()
+        ->for($this->team)
+        ->for($this->squad)
+        ->create([
+            'year' => 2026,
+            'quarter' => 2,
+            'available_story_points' => 80,
+        ]);
+
+    $component = Livewire::withQueryParams([
+        'quarter' => 'Q2-2026',
+        'squads' => [$this->squad->id],
+    ])
+        ->test('planning.show', ['plan' => null]);
+
+    // Verify quarter plans were loaded
+    expect($component->get('quarterPlans'))->toHaveKey($this->squad->id);
+    expect($component->get('editingCapacityValues')[$this->squad->id])->toBe(80);
+});
+
+it('shows multi-squad view when multiple squads provided via URL', function () {
+    $squad2 = Squad::factory()->for($this->team)->create();
+
+    // Create quarter plans for both squads
+    QuarterPlan::factory()->for($this->team)->for($this->squad)->create([
+        'year' => 2026,
+        'quarter' => 2,
+        'available_story_points' => 50,
+    ]);
+    QuarterPlan::factory()->for($this->team)->for($squad2)->create([
+        'year' => 2026,
+        'quarter' => 2,
+        'available_story_points' => 60,
+    ]);
+
+    $component = Livewire::withQueryParams([
+        'quarter' => 'Q2-2026',
+        'squads' => [$this->squad->id, $squad2->id],
+    ])
+        ->test('planning.show', ['plan' => null]);
+
+    // Verify multi-squad view is active
+    expect($component->viewData('isMultiSquadView'))->toBeTrue();
+
+    // Verify both squads are in squadData
+    $squadData = $component->viewData('squadData');
+    expect($squadData)->toHaveKey($this->squad->id);
+    expect($squadData)->toHaveKey($squad2->id);
+    expect($squadData[$this->squad->id]['capacity'])->toBe(50);
+    expect($squadData[$squad2->id]['capacity'])->toBe(60);
+});
+
+it('handles string URL squad IDs with loose comparison', function () {
+    $squad2 = Squad::factory()->for($this->team)->create();
+
+    // Simulate URL params as strings (as they come from browser)
+    $component = Livewire::withQueryParams([
+        'quarter' => 'Q2-2026',
+        'squads' => [(string) $this->squad->id, (string) $squad2->id],
+    ])
+        ->test('planning.show', ['plan' => null]);
+
+    // URL params stay as strings but loose comparison works
+    $selectedSquadIds = $component->get('selectedSquadIds');
+    expect($selectedSquadIds)->toHaveCount(2);
+
+    // Verify multi-squad view works with string IDs (loose comparison)
+    expect($component->viewData('isMultiSquadView'))->toBeTrue();
+    $squadData = $component->viewData('squadData');
+    expect($squadData)->toHaveCount(2);
+    // squadData keys are integers (from $squad->id)
+    expect($squadData)->toHaveKey($this->squad->id);
+    expect($squadData)->toHaveKey($squad2->id);
+});
+
+it('uses default quarter when URL quarter is invalid', function () {
+    Livewire::withQueryParams(['quarter' => 'Q1-2020']) // Past quarter not in list
+        ->test('planning.show', ['plan' => null])
+        ->assertSet('selectedQuarter', fn ($value) => preg_match('/^Q[1-4]-\d{4}$/', $value) === 1);
+});
+
 it('can set squad capacity for a quarter', function () {
     Livewire::test('planning.show', ['plan' => null])
         ->set('selectedQuarter', 'Q1-2026')
@@ -1748,4 +1856,422 @@ it('can edit backlog epic via popover without adding to plan', function () {
         'squad_id' => $this->squad->id,
         'quarter' => 'Q1-2026',
     ]);
+});
+
+// Multi-Squad Drag & Drop Tests
+
+it('can move epic between squads in multi-squad view', function () {
+    $squad1 = Squad::factory()->for($this->team)->create(['name' => 'Squad 1']);
+    $squad2 = Squad::factory()->for($this->team)->create(['name' => 'Squad 2']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create(['title' => 'Epic to Move']);
+
+    // Epic assigned to squad1, planned for squad1
+    $epic->squads()->attach($squad1->id);
+    EpicQuarterPlan::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $squad1->id,
+        'quarter' => 'Q1-2026',
+        'story_points' => 25,
+        'category_id' => null,
+    ]);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$squad1->id, $squad2->id])
+        ->call('moveEpicBetweenSquads', $epic->id, $squad1->id, $squad2->id, 0);
+
+    // Epic should be removed from squad1's plan
+    $this->assertDatabaseMissing('epic_quarter_plans', [
+        'epic_id' => $epic->id,
+        'squad_id' => $squad1->id,
+        'quarter' => 'Q1-2026',
+    ]);
+
+    // Epic should be added to squad2's plan with same story points
+    $this->assertDatabaseHas('epic_quarter_plans', [
+        'epic_id' => $epic->id,
+        'squad_id' => $squad2->id,
+        'quarter' => 'Q1-2026',
+        'story_points' => 25,
+    ]);
+
+    // Epic should be assigned to squad2
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $squad2->id,
+    ]);
+});
+
+it('move between squads preserves category from source plan', function () {
+    $squad1 = Squad::factory()->for($this->team)->create(['name' => 'Squad 1']);
+    $squad2 = Squad::factory()->for($this->team)->create(['name' => 'Squad 2']);
+    $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Growth']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create(['title' => 'Categorized Epic']);
+
+    $epic->squads()->attach($squad1->id);
+    EpicQuarterPlan::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $squad1->id,
+        'quarter' => 'Q1-2026',
+        'story_points' => 30,
+        'category_id' => $category->id,
+    ]);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$squad1->id, $squad2->id])
+        ->call('moveEpicBetweenSquads', $epic->id, $squad1->id, $squad2->id, 0);
+
+    // Target plan should have same category
+    $this->assertDatabaseHas('epic_quarter_plans', [
+        'epic_id' => $epic->id,
+        'squad_id' => $squad2->id,
+        'quarter' => 'Q1-2026',
+        'story_points' => 30,
+        'category_id' => $category->id,
+    ]);
+});
+
+it('move between squads does nothing if same squad', function () {
+    $squad1 = Squad::factory()->for($this->team)->create(['name' => 'Squad 1']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create(['title' => 'Epic']);
+
+    $epic->squads()->attach($squad1->id);
+    EpicQuarterPlan::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $squad1->id,
+        'quarter' => 'Q1-2026',
+        'story_points' => 20,
+    ]);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$squad1->id])
+        ->call('moveEpicBetweenSquads', $epic->id, $squad1->id, $squad1->id, 0);
+
+    // Plan should still exist unchanged
+    $this->assertDatabaseHas('epic_quarter_plans', [
+        'epic_id' => $epic->id,
+        'squad_id' => $squad1->id,
+        'quarter' => 'Q1-2026',
+        'story_points' => 20,
+    ]);
+});
+
+it('move between squads does nothing if source squad not selected', function () {
+    $squad1 = Squad::factory()->for($this->team)->create(['name' => 'Squad 1']);
+    $squad2 = Squad::factory()->for($this->team)->create(['name' => 'Squad 2']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create(['title' => 'Epic']);
+
+    $epic->squads()->attach($squad1->id);
+    EpicQuarterPlan::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $squad1->id,
+        'quarter' => 'Q1-2026',
+        'story_points' => 20,
+    ]);
+
+    // Only squad2 selected, but trying to move from squad1
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$squad2->id])
+        ->call('moveEpicBetweenSquads', $epic->id, $squad1->id, $squad2->id, 0);
+
+    // Original plan should still exist
+    $this->assertDatabaseHas('epic_quarter_plans', [
+        'epic_id' => $epic->id,
+        'squad_id' => $squad1->id,
+        'quarter' => 'Q1-2026',
+    ]);
+
+    // No new plan created
+    $this->assertDatabaseMissing('epic_quarter_plans', [
+        'epic_id' => $epic->id,
+        'squad_id' => $squad2->id,
+        'quarter' => 'Q1-2026',
+    ]);
+});
+
+it('move between squads does nothing if target squad not selected', function () {
+    $squad1 = Squad::factory()->for($this->team)->create(['name' => 'Squad 1']);
+    $squad2 = Squad::factory()->for($this->team)->create(['name' => 'Squad 2']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create(['title' => 'Epic']);
+
+    $epic->squads()->attach($squad1->id);
+    EpicQuarterPlan::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $squad1->id,
+        'quarter' => 'Q1-2026',
+        'story_points' => 20,
+    ]);
+
+    // Only squad1 selected, but trying to move to squad2
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$squad1->id])
+        ->call('moveEpicBetweenSquads', $epic->id, $squad1->id, $squad2->id, 0);
+
+    // Original plan should still exist
+    $this->assertDatabaseHas('epic_quarter_plans', [
+        'epic_id' => $epic->id,
+        'squad_id' => $squad1->id,
+        'quarter' => 'Q1-2026',
+    ]);
+
+    // No new plan created
+    $this->assertDatabaseMissing('epic_quarter_plans', [
+        'epic_id' => $epic->id,
+        'squad_id' => $squad2->id,
+        'quarter' => 'Q1-2026',
+    ]);
+});
+
+it('move between squads does nothing if epic not in source squad plan', function () {
+    $squad1 = Squad::factory()->for($this->team)->create(['name' => 'Squad 1']);
+    $squad2 = Squad::factory()->for($this->team)->create(['name' => 'Squad 2']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create(['title' => 'Epic']);
+
+    // Epic assigned but NOT planned
+    $epic->squads()->attach($squad1->id);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$squad1->id, $squad2->id])
+        ->call('moveEpicBetweenSquads', $epic->id, $squad1->id, $squad2->id, 0);
+
+    // No plan should be created
+    $this->assertDatabaseMissing('epic_quarter_plans', [
+        'epic_id' => $epic->id,
+        'squad_id' => $squad2->id,
+        'quarter' => 'Q1-2026',
+    ]);
+});
+
+it('move between squads does nothing for epic from another team', function () {
+    $squad1 = Squad::factory()->for($this->team)->create(['name' => 'Squad 1']);
+    $squad2 = Squad::factory()->for($this->team)->create(['name' => 'Squad 2']);
+    $otherTeam = Team::factory()->create();
+
+    $otherEpic = Epic::factory()
+        ->for($otherTeam)
+        ->for($this->status)
+        ->create(['title' => 'Other Team Epic']);
+
+    $otherEpic->squads()->attach($squad1->id);
+    EpicQuarterPlan::create([
+        'epic_id' => $otherEpic->id,
+        'squad_id' => $squad1->id,
+        'quarter' => 'Q1-2026',
+        'story_points' => 20,
+    ]);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$squad1->id, $squad2->id])
+        ->call('moveEpicBetweenSquads', $otherEpic->id, $squad1->id, $squad2->id, 0);
+
+    // Original plan should still exist (nothing changed)
+    $this->assertDatabaseHas('epic_quarter_plans', [
+        'epic_id' => $otherEpic->id,
+        'squad_id' => $squad1->id,
+        'quarter' => 'Q1-2026',
+    ]);
+
+    // No new plan created for squad2
+    $this->assertDatabaseMissing('epic_quarter_plans', [
+        'epic_id' => $otherEpic->id,
+        'squad_id' => $squad2->id,
+        'quarter' => 'Q1-2026',
+    ]);
+});
+
+it('move between squads assigns epic to target squad if not already assigned', function () {
+    $squad1 = Squad::factory()->for($this->team)->create(['name' => 'Squad 1']);
+    $squad2 = Squad::factory()->for($this->team)->create(['name' => 'Squad 2']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create(['title' => 'Epic']);
+
+    // Only assigned to squad1 initially
+    $epic->squads()->attach($squad1->id);
+    EpicQuarterPlan::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $squad1->id,
+        'quarter' => 'Q1-2026',
+        'story_points' => 20,
+    ]);
+
+    // Verify not assigned to squad2 initially
+    $this->assertDatabaseMissing('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $squad2->id,
+    ]);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$squad1->id, $squad2->id])
+        ->call('moveEpicBetweenSquads', $epic->id, $squad1->id, $squad2->id, 0);
+
+    // Now epic should be assigned to squad2
+    $this->assertDatabaseHas('epic_squad', [
+        'epic_id' => $epic->id,
+        'squad_id' => $squad2->id,
+    ]);
+});
+
+it('move between squads does not create duplicate if target already has plan', function () {
+    $squad1 = Squad::factory()->for($this->team)->create(['name' => 'Squad 1']);
+    $squad2 = Squad::factory()->for($this->team)->create(['name' => 'Squad 2']);
+
+    $epic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create(['title' => 'Epic']);
+
+    $epic->squads()->attach([$squad1->id, $squad2->id]);
+
+    // Epic already planned for BOTH squads
+    EpicQuarterPlan::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $squad1->id,
+        'quarter' => 'Q1-2026',
+        'story_points' => 20,
+    ]);
+    EpicQuarterPlan::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $squad2->id,
+        'quarter' => 'Q1-2026',
+        'story_points' => 15,
+    ]);
+
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$squad1->id, $squad2->id])
+        ->call('moveEpicBetweenSquads', $epic->id, $squad1->id, $squad2->id, 0);
+
+    // Squad1 plan should be deleted
+    $this->assertDatabaseMissing('epic_quarter_plans', [
+        'epic_id' => $epic->id,
+        'squad_id' => $squad1->id,
+        'quarter' => 'Q1-2026',
+    ]);
+
+    // Squad2 plan should exist (firstOrCreate keeps existing)
+    $this->assertDatabaseHas('epic_quarter_plans', [
+        'epic_id' => $epic->id,
+        'squad_id' => $squad2->id,
+        'quarter' => 'Q1-2026',
+        'story_points' => 15, // Original value preserved by firstOrCreate
+    ]);
+});
+
+it('multi-squad view shows unique epics per squad excluding shared', function () {
+    $squad1 = Squad::factory()->for($this->team)->create(['name' => 'Squad 1']);
+    $squad2 = Squad::factory()->for($this->team)->create(['name' => 'Squad 2']);
+
+    // Shared epic (planned for both)
+    $sharedEpic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create(['title' => 'Shared Epic']);
+    $sharedEpic->squads()->attach([$squad1->id, $squad2->id]);
+    EpicQuarterPlan::create(['epic_id' => $sharedEpic->id, 'squad_id' => $squad1->id, 'quarter' => 'Q1-2026', 'story_points' => 10]);
+    EpicQuarterPlan::create(['epic_id' => $sharedEpic->id, 'squad_id' => $squad2->id, 'quarter' => 'Q1-2026', 'story_points' => 10]);
+
+    // Unique epic for squad1
+    $uniqueEpic1 = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create(['title' => 'Squad 1 Only']);
+    $uniqueEpic1->squads()->attach($squad1->id);
+    EpicQuarterPlan::create(['epic_id' => $uniqueEpic1->id, 'squad_id' => $squad1->id, 'quarter' => 'Q1-2026', 'story_points' => 20]);
+
+    // Unique epic for squad2
+    $uniqueEpic2 = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create(['title' => 'Squad 2 Only']);
+    $uniqueEpic2->squads()->attach($squad2->id);
+    EpicQuarterPlan::create(['epic_id' => $uniqueEpic2->id, 'squad_id' => $squad2->id, 'quarter' => 'Q1-2026', 'story_points' => 15]);
+
+    $component = Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$squad1->id, $squad2->id]);
+
+    $squadData = $component->viewData('squadData');
+    $sharedEpics = $component->viewData('sharedEpics');
+
+    // Shared epics should contain the shared one
+    expect($sharedEpics)->toHaveCount(1)
+        ->and($sharedEpics->first()->id)->toBe($sharedEpic->id);
+
+    // Squad1 unique epics should only contain uniqueEpic1
+    expect($squadData[$squad1->id]['planned_epics'])->toHaveCount(1)
+        ->and($squadData[$squad1->id]['planned_epics']->first()->id)->toBe($uniqueEpic1->id);
+
+    // Squad2 unique epics should only contain uniqueEpic2
+    expect($squadData[$squad2->id]['planned_epics'])->toHaveCount(1)
+        ->and($squadData[$squad2->id]['planned_epics']->first()->id)->toBe($uniqueEpic2->id);
+});
+
+it('moving epic makes it unique to target squad if was shared', function () {
+    $squad1 = Squad::factory()->for($this->team)->create(['name' => 'Squad 1']);
+    $squad2 = Squad::factory()->for($this->team)->create(['name' => 'Squad 2']);
+
+    // Epic is shared (planned for both squads)
+    $sharedEpic = Epic::factory()
+        ->for($this->team)
+        ->for($this->status)
+        ->create(['title' => 'Shared Epic']);
+    $sharedEpic->squads()->attach([$squad1->id, $squad2->id]);
+    EpicQuarterPlan::create(['epic_id' => $sharedEpic->id, 'squad_id' => $squad1->id, 'quarter' => 'Q1-2026', 'story_points' => 10]);
+    EpicQuarterPlan::create(['epic_id' => $sharedEpic->id, 'squad_id' => $squad2->id, 'quarter' => 'Q1-2026', 'story_points' => 15]);
+
+    $component = Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$squad1->id, $squad2->id]);
+
+    // Initially should be in shared
+    $sharedEpics = $component->viewData('sharedEpics');
+    expect($sharedEpics)->toHaveCount(1);
+
+    // Move from squad1 to squad2 (even though squad2 already has it)
+    $component->call('moveEpicBetweenSquads', $sharedEpic->id, $squad1->id, $squad2->id, 0);
+
+    // Re-fetch data
+    $sharedEpics = $component->viewData('sharedEpics');
+    $squadData = $component->viewData('squadData');
+
+    // Now should NOT be shared (only in squad2)
+    expect($sharedEpics)->toHaveCount(0);
+
+    // Should be unique to squad2
+    expect($squadData[$squad2->id]['planned_epics'])->toHaveCount(1)
+        ->and($squadData[$squad2->id]['planned_epics']->first()->id)->toBe($sharedEpic->id);
 });

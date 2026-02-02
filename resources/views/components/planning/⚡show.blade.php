@@ -11,12 +11,15 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 
 new #[Layout('components.layouts.app.sidebar')] class extends Component
 {
+    #[Url(as: 'quarter', history: true)]
     public string $selectedQuarter = '';
 
+    #[Url(as: 'squads', history: true)]
     public array $selectedSquadIds = [];
 
     public array $quarterPlans = [];
@@ -28,27 +31,52 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
     public function mount(?QuarterPlan $plan = null): void
     {
-        if ($plan) {
-            // Edit existing plan - load that squad into the array
+        // URL parameters are hydrated before mount - check if we have values from URL
+        $hasUrlSquads = !empty($this->selectedSquadIds);
+        $hasUrlQuarter = !empty($this->selectedQuarter);
+
+        if ($plan && !$hasUrlSquads && !$hasUrlQuarter) {
+            // Edit existing plan (no URL overrides) - load that squad into the array
             $this->authorizePlan($plan);
             $this->selectedQuarter = $plan->getQuarterString();
             $this->selectedSquadIds = [$plan->squad_id];
             $this->loadQuarterPlans();
         } else {
-            // Create new plan - default to current quarter
-            $now = Carbon::now();
-            $currentQuarter = (int) ceil($now->month / 3);
-            $currentYear = $now->year;
+            // Use URL params if present, otherwise use plan or defaults
+            if ($plan) {
+                $this->authorizePlan($plan);
+            }
 
-            $this->selectedQuarter = "Q{$currentQuarter}-{$currentYear}";
+            // Set quarter from URL, plan, or default
+            if (empty($this->selectedQuarter)) {
+                if ($plan) {
+                    $this->selectedQuarter = $plan->getQuarterString();
+                } else {
+                    $now = Carbon::now();
+                    $currentQuarter = (int) ceil($now->month / 3);
+                    $currentYear = $now->year;
+                    $this->selectedQuarter = "Q{$currentQuarter}-{$currentYear}";
+                }
+            }
+
+            // Set squads from URL or plan
+            if (empty($this->selectedSquadIds) && $plan) {
+                $this->selectedSquadIds = [$plan->squad_id];
+            }
 
             // Ensure selectedQuarter is in availableQuarters
             $availableQuarters = $this->getAvailableQuarters();
             if (! in_array($this->selectedQuarter, $availableQuarters, true)) {
                 $this->selectedQuarter = $availableQuarters[0] ?? 'Q1-2026';
             }
+
+            // Load quarter plans if we have squads
+            if (!empty($this->selectedSquadIds)) {
+                $this->loadQuarterPlans();
+            }
         }
     }
+
 
     public function loadQuarterPlans(): void
     {
@@ -465,28 +493,33 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $otherSquadIds = array_values(array_diff($this->selectedSquadIds, [$squadId]));
 
         return $team->epics()
-            ->with(['status', 'squads', 'category', 'quarterPlans'])
+            ->with([
+                'status',
+                'squads',
+                'category',
+                'quarterPlans' => fn ($q) => $q->where('squad_id', $squadId),
+            ])
             ->whereHas('quarterPlans', function ($q) use ($squadId, $selectedQuarter) {
                 $q->where('squad_id', $squadId)
                     ->where('quarter', $selectedQuarter);
             })
-            ->get()
-            ->filter(function ($epic) use ($otherSquadIds, $selectedQuarter) {
-                // Filter out epics planned for any other selected squad
-                return ! $epic->quarterPlans
-                    ->whereIn('squad_id', $otherSquadIds)
-                    ->where('quarter', $selectedQuarter)
-                    ->isNotEmpty();
+            // Exclude epics planned for any other selected squad
+            ->whereDoesntHave('quarterPlans', function ($q) use ($otherSquadIds, $selectedQuarter) {
+                $q->whereIn('squad_id', $otherSquadIds)
+                    ->where('quarter', $selectedQuarter);
             })
-            ->map(function ($epic) use ($squadId, $selectedQuarter) {
-                $quarterPlan = $epic->quarterPlans
-                    ->where('squad_id', $squadId)
-                    ->where('quarter', $selectedQuarter)
-                    ->first();
-                $epic->planned_story_points = $quarterPlan->story_points ?? null;
-
-                return $epic;
-            });
+            ->join('epic_quarter_plans as eqp', function ($join) use ($squadId, $selectedQuarter) {
+                $join->on('epics.id', '=', 'eqp.epic_id')
+                    ->where('eqp.squad_id', '=', $squadId)
+                    ->where('eqp.quarter', '=', $selectedQuarter);
+            })
+            ->join('epic_squad as es', function ($join) use ($squadId) {
+                $join->on('epics.id', '=', 'es.epic_id')
+                    ->where('es.squad_id', '=', $squadId);
+            })
+            ->orderByRaw('eqp.sort_order IS NULL, eqp.sort_order ASC')
+            ->select('epics.*', 'eqp.story_points as planned_story_points', 'eqp.sort_order', 'eqp.category_id as plan_category_id', 'es.estimated_story_points')
+            ->get();
     }
 
     public function getAvailableEpics(): \Illuminate\Support\Collection
@@ -830,6 +863,73 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $quarterPlan->move($position);
     }
 
+    public function moveEpicBetweenSquads(int $epicId, $fromSquadId, int $toSquadId, int $position): void
+    {
+        // $fromSquadId comes from JavaScript dataset as a string
+        if ($fromSquadId === null || $fromSquadId === '' || $fromSquadId === 'undefined') {
+            return;
+        }
+        $fromSquadId = (int) $fromSquadId;
+
+        // selectedSquadIds may contain strings from Livewire, so use loose comparison
+        if ($fromSquadId === 0 || !in_array($fromSquadId, $this->selectedSquadIds) || !in_array($toSquadId, $this->selectedSquadIds)) {
+            return;
+        }
+
+        if ($fromSquadId === $toSquadId) {
+            return;
+        }
+
+        $team = Auth::user()->currentTeam;
+        $epic = Epic::where('id', $epicId)->where('team_id', $team->id)->first();
+        if (!$epic) {
+            return;
+        }
+
+        // Get the existing quarter plan from the source squad
+        $sourceQuarterPlan = EpicQuarterPlan::where('epic_id', $epicId)
+            ->where('squad_id', $fromSquadId)
+            ->where('quarter', $this->selectedQuarter)
+            ->first();
+
+        // If epic is not in source squad (already moved or stale event), do nothing
+        if (!$sourceQuarterPlan) {
+            return;
+        }
+
+        // Check if epic is already in target squad - if so, this is likely a duplicate/stale event
+        $existingTargetPlan = EpicQuarterPlan::where('epic_id', $epicId)
+            ->where('squad_id', $toSquadId)
+            ->where('quarter', $this->selectedQuarter)
+            ->exists();
+
+        if ($existingTargetPlan) {
+            // Epic is already in target squad - just delete from source if still there
+            $sourceQuarterPlan->delete();
+            return;
+        }
+
+        // Ensure epic is assigned to the target squad
+        if (!$epic->squads()->where('squads.id', $toSquadId)->exists()) {
+            $epic->squads()->attach($toSquadId);
+        }
+
+        // Create quarter plan for target squad (copy story points and category from source)
+        $targetQuarterPlan = EpicQuarterPlan::create([
+            'epic_id' => $epicId,
+            'squad_id' => $toSquadId,
+            'quarter' => $this->selectedQuarter,
+            'story_points' => $sourceQuarterPlan->story_points,
+            'category_id' => $sourceQuarterPlan->category_id,
+        ]);
+
+        // Move to specified position in the target squad
+        $targetQuarterPlan->move($position);
+
+        // Remove from source squad's plan
+        $sourceQuarterPlan->delete();
+    }
+
     private function authorizeEpic(Epic $epic): void
     {
         if ($epic->team_id !== Auth::user()->currentTeam->id) {
@@ -847,7 +947,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     public function with(): array
     {
         $squads = Auth::user()->currentTeam->squads()->orderBy('name')->get();
-        $selectedSquads = $squads->whereIn('id', $this->selectedSquadIds);
+        // Use whereInLoose for string/int comparison (URL params are strings, DB ids are ints)
+        $selectedSquads = $squads->filter(fn ($s) => in_array($s->id, $this->selectedSquadIds));
         $isMultiSquadView = count($this->selectedSquadIds) > 1;
 
         // Batch fetch aggregate data for all squads (2 queries instead of N*2)
@@ -857,15 +958,18 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         // Build capacity and epic data per squad
         $squadData = [];
         foreach ($this->selectedSquadIds as $squadId) {
-            $squad = $squads->find($squadId);
+            // Use firstWhere with loose comparison (URL params are strings)
+            $squad = $squads->firstWhere('id', $squadId);
             if (! $squad) {
                 continue;
             }
 
-            $capacity = $this->editingCapacityValues[$squadId] ?? 0;
-            $allocated = $allocatedBySquad[$squadId] ?? 0;
+            // Use $squad->id (int) for consistency in all lookups
+            $intSquadId = $squad->id;
+            $capacity = $this->editingCapacityValues[$intSquadId] ?? 0;
+            $allocated = $allocatedBySquad[$intSquadId] ?? 0;
 
-            $squadData[$squadId] = [
+            $squadData[$intSquadId] = [
                 'squad' => $squad,
                 'capacity' => $capacity,
                 'allocated' => $allocated,
@@ -873,10 +977,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 'is_over_allocated' => $allocated > $capacity,
                 'percentage' => $capacity > 0 ? min(($allocated / $capacity) * 100, 100) : 0,
                 'planned_epics' => $isMultiSquadView
-                    ? $this->getUniqueEpicsForSquad($squadId)
-                    : $this->getPlannedEpicsForSquad($squadId),
-                'backlog_epics' => $this->getBacklogEpicsForSquad($squadId),
-                'actual_by_category' => $actualByCategoryBySquad[$squadId] ?? [],
+                    ? $this->getUniqueEpicsForSquad($intSquadId)
+                    : $this->getPlannedEpicsForSquad($intSquadId),
+                'backlog_epics' => $this->getBacklogEpicsForSquad($intSquadId),
+                'actual_by_category' => $actualByCategoryBySquad[$intSquadId] ?? [],
             ];
         }
 
@@ -1107,40 +1211,46 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             @endif
 
             {{-- Squad-Specific Columns --}}
-            <div class="grid gap-4 mb-6" style="grid-template-columns: repeat({{ count($squadData) }}, minmax(0, 1fr));">
+            <div
+                class="grid gap-4 mb-6"
+                style="grid-template-columns: repeat({{ count($squadData) }}, minmax(0, 1fr));"
+                x-data="{ dragSourceSquadId: null }"
+                @dragstart.window="dragSourceSquadId = $event.target.closest('[data-source-squad-id]')?.dataset.sourceSquadId"
+            >
                 @foreach($squadData as $squadId => $data)
                 <div>
                     <div class="flex items-center gap-2 mb-3">
-                        <div class="h-2 w-2 rounded-full" style="background-color: {{ $data['squad']->color }}"></div>
+                        <div class="h-3 w-3 rounded-full" style="background-color: {{ $data['squad']->color }}"></div>
                         <h3 class="text-sm font-medium">{{ $data['squad']->name }} Only</h3>
                         <flux:badge color="zinc" size="sm">{{ $data['planned_epics']->count() }}</flux:badge>
                     </div>
 
-                    <div class="space-y-1">
+                    <div
+                        class="flex flex-col gap-2 min-h-[120px] p-2 bg-zinc-50/50 dark:bg-zinc-800/30 rounded-lg border-2 border-dashed border-transparent transition-colors"
+                        x-sort="$wire.moveEpicBetweenSquads($item, dragSourceSquadId, {{ $squadId }}, $position)"
+                        x-sort:group="multi-squad-planning"
+                        data-squad-id="{{ $squadId }}"
+                    >
                         @forelse($data['planned_epics'] as $epic)
-                        <div class="flex items-center gap-2 px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border-l-4 rounded-r" style="border-color: {{ $data['squad']->color }}">
-                            <flux:text class="text-sm truncate flex-1">{{ $epic->title }}</flux:text>
-                            <div class="w-18 shrink-0">
-                                <flux:input
-                                    type="number"
-                                    wire:change.debounce.500ms="updateEpicStoryPoints({{ $epic->id }}, {{ $squadId }}, $event.target.value)"
-                                    value="{{ $epic->planned_story_points }}"
-                                    min="0"
-                                    placeholder="pts"
-                                />
-                            </div>
-                            <flux:button
-                                variant="ghost"
-                                size="xs"
-                                wire:click="removeEpicFromPlan({{ $epic->id }}, {{ $squadId }})"
-                                icon="x-mark"
+                            <x-planning.kanban-card
+                                :epic="$epic"
+                                :squadId="$squadId"
+                                :planned="true"
+                                :statuses="$statuses"
+                                :categories="$allCategories"
+                                :quarter="$this->selectedQuarter"
+                                :squadName="$data['squad']->name"
                             />
-                        </div>
                         @empty
-                        <div class="text-center py-3 border border-dashed border-zinc-200 dark:border-zinc-700 rounded text-xs text-zinc-400">
-                            No unique epics
-                        </div>
                         @endforelse
+                        {{-- Show placeholder if fewer than 3 items --}}
+                        @if($data['planned_epics']->count() < 3)
+                        <div class="min-h-[100px] border-2 border-dashed border-zinc-300 dark:border-zinc-600 rounded-lg flex items-center justify-center">
+                            @if($data['planned_epics']->isEmpty())
+                            <span class="text-xs text-zinc-400">Drag epics here</span>
+                            @endif
+                        </div>
+                        @endif
                     </div>
                 </div>
                 @endforeach

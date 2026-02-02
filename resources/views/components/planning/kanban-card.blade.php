@@ -19,7 +19,8 @@
 
 <div
     @if($sortable) x-sort:item="{{ $epic->id }}" @endif
-    wire:key="{{ $planned ? 'planned' : 'backlog' }}-{{ $epic->id }}"
+    wire:key="{{ $planned ? 'planned' : 'backlog' }}-{{ $epic->id }}-{{ $squadId }}"
+    data-source-squad-id="{{ $squadId }}"
     wire:transition
 >
     <div
