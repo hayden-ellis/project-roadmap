@@ -1940,8 +1940,9 @@ it('move between squads preserves category from source plan', function () {
     ]);
 });
 
-it('move between squads does nothing if same squad', function () {
+it('move between squads with same squad reorders using global_sort_order', function () {
     $squad1 = Squad::factory()->for($this->team)->create(['name' => 'Squad 1']);
+    $squad2 = Squad::factory()->for($this->team)->create(['name' => 'Squad 2']);
 
     $epic = Epic::factory()
         ->for($this->team)
@@ -1949,25 +1950,30 @@ it('move between squads does nothing if same squad', function () {
         ->create(['title' => 'Epic']);
 
     $epic->squads()->attach($squad1->id);
-    EpicQuarterPlan::create([
+    $plan = EpicQuarterPlan::create([
         'epic_id' => $epic->id,
         'squad_id' => $squad1->id,
         'quarter' => 'Q1-2026',
         'story_points' => 20,
+        'global_sort_order' => null,
     ]);
 
     Livewire::test('planning.show', ['plan' => null])
         ->set('selectedQuarter', 'Q1-2026')
-        ->set('selectedSquadIds', [$squad1->id])
+        ->set('selectedSquadIds', [$squad1->id, $squad2->id]) // Multi-squad view
         ->call('moveEpicBetweenSquads', $epic->id, $squad1->id, $squad1->id, 0);
 
-    // Plan should still exist unchanged
+    // Plan should still exist with story_points unchanged
     $this->assertDatabaseHas('epic_quarter_plans', [
         'epic_id' => $epic->id,
         'squad_id' => $squad1->id,
         'quarter' => 'Q1-2026',
         'story_points' => 20,
     ]);
+
+    // But global_sort_order should be set
+    $plan->refresh();
+    expect($plan->global_sort_order)->toBe(0);
 });
 
 it('move between squads does nothing if source squad not selected', function () {
@@ -2274,4 +2280,218 @@ it('moving epic makes it unique to target squad if was shared', function () {
     // Should be unique to squad2
     expect($squadData[$squad2->id]['planned_epics'])->toHaveCount(1)
         ->and($squadData[$squad2->id]['planned_epics']->first()->id)->toBe($sharedEpic->id);
+});
+
+// ========================================
+// Multi-Squad Reordering Tests (global_sort_order)
+// ========================================
+
+it('can reorder epic within same squad in multi-squad view', function () {
+    $squad1 = Squad::factory()->for($this->team)->create(['name' => 'Squad 1']);
+    $squad2 = Squad::factory()->for($this->team)->create(['name' => 'Squad 2']);
+
+    // Create 3 epics for squad1
+    $epic1 = Epic::factory()->for($this->team)->for($this->status)->create(['title' => 'Epic 1']);
+    $epic2 = Epic::factory()->for($this->team)->for($this->status)->create(['title' => 'Epic 2']);
+    $epic3 = Epic::factory()->for($this->team)->for($this->status)->create(['title' => 'Epic 3']);
+
+    $epic1->squads()->attach($squad1->id);
+    $epic2->squads()->attach($squad1->id);
+    $epic3->squads()->attach($squad1->id);
+
+    // Create quarter plans with initial global_sort_order
+    $plan1 = EpicQuarterPlan::create(['epic_id' => $epic1->id, 'squad_id' => $squad1->id, 'quarter' => 'Q1-2026', 'story_points' => 10, 'global_sort_order' => 0]);
+    $plan2 = EpicQuarterPlan::create(['epic_id' => $epic2->id, 'squad_id' => $squad1->id, 'quarter' => 'Q1-2026', 'story_points' => 20, 'global_sort_order' => 1]);
+    $plan3 = EpicQuarterPlan::create(['epic_id' => $epic3->id, 'squad_id' => $squad1->id, 'quarter' => 'Q1-2026', 'story_points' => 30, 'global_sort_order' => 2]);
+
+    // Move epic3 from position 2 to position 0 (same squad = reorder)
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$squad1->id, $squad2->id])
+        ->call('moveEpicBetweenSquads', $epic3->id, $squad1->id, $squad1->id, 0);
+
+    // Verify order changed
+    $plan1->refresh();
+    $plan2->refresh();
+    $plan3->refresh();
+
+    expect($plan3->global_sort_order)->toBe(0)
+        ->and($plan1->global_sort_order)->toBe(1)
+        ->and($plan2->global_sort_order)->toBe(2);
+});
+
+it('reorder within squad uses global_sort_order not category sort_order', function () {
+    $squad1 = Squad::factory()->for($this->team)->create(['name' => 'Squad 1']);
+    $squad2 = Squad::factory()->for($this->team)->create(['name' => 'Squad 2']);
+    $category1 = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Category 1']);
+    $category2 = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Category 2']);
+
+    // Create epics in different categories
+    $epic1 = Epic::factory()->for($this->team)->for($this->status)->create(['title' => 'Epic 1']);
+    $epic2 = Epic::factory()->for($this->team)->for($this->status)->create(['title' => 'Epic 2']);
+
+    $epic1->squads()->attach($squad1->id);
+    $epic2->squads()->attach($squad1->id);
+
+    // Epic1 in Category1, Epic2 in Category2, but both have global_sort_order
+    $plan1 = EpicQuarterPlan::create([
+        'epic_id' => $epic1->id,
+        'squad_id' => $squad1->id,
+        'quarter' => 'Q1-2026',
+        'category_id' => $category1->id,
+        'sort_order' => 0,
+        'global_sort_order' => 0,
+    ]);
+    $plan2 = EpicQuarterPlan::create([
+        'epic_id' => $epic2->id,
+        'squad_id' => $squad1->id,
+        'quarter' => 'Q1-2026',
+        'category_id' => $category2->id,
+        'sort_order' => 0, // Same sort_order because different category scopes
+        'global_sort_order' => 1,
+    ]);
+
+    // Reorder epic2 to position 0
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$squad1->id, $squad2->id])
+        ->call('moveEpicBetweenSquads', $epic2->id, $squad1->id, $squad1->id, 0);
+
+    $plan1->refresh();
+    $plan2->refresh();
+
+    // global_sort_order should change
+    expect($plan2->global_sort_order)->toBe(0)
+        ->and($plan1->global_sort_order)->toBe(1);
+
+    // Category-scoped sort_order should remain unchanged
+    expect($plan1->sort_order)->toBe(0)
+        ->and($plan2->sort_order)->toBe(0);
+});
+
+it('moving epic between squads sets global_sort_order in target', function () {
+    $squad1 = Squad::factory()->for($this->team)->create(['name' => 'Squad 1']);
+    $squad2 = Squad::factory()->for($this->team)->create(['name' => 'Squad 2']);
+
+    // Epic starts in squad1
+    $epic = Epic::factory()->for($this->team)->for($this->status)->create(['title' => 'Moving Epic']);
+    $epic->squads()->attach([$squad1->id, $squad2->id]);
+    EpicQuarterPlan::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $squad1->id,
+        'quarter' => 'Q1-2026',
+        'story_points' => 10,
+        'global_sort_order' => 5,
+    ]);
+
+    // Existing epic in squad2 at position 0
+    $existingEpic = Epic::factory()->for($this->team)->for($this->status)->create(['title' => 'Existing']);
+    $existingEpic->squads()->attach($squad2->id);
+    $existingPlan = EpicQuarterPlan::create([
+        'epic_id' => $existingEpic->id,
+        'squad_id' => $squad2->id,
+        'quarter' => 'Q1-2026',
+        'story_points' => 20,
+        'global_sort_order' => 0,
+    ]);
+
+    // Move epic to squad2 at position 0 (should push existing to 1)
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$squad1->id, $squad2->id])
+        ->call('moveEpicBetweenSquads', $epic->id, $squad1->id, $squad2->id, 0);
+
+    // Verify new plan in squad2 has global_sort_order 0
+    $newPlan = EpicQuarterPlan::where('epic_id', $epic->id)
+        ->where('squad_id', $squad2->id)
+        ->where('quarter', 'Q1-2026')
+        ->first();
+
+    expect($newPlan)->not->toBeNull()
+        ->and($newPlan->global_sort_order)->toBe(0);
+
+    // Existing plan should be bumped to 1
+    $existingPlan->refresh();
+    expect($existingPlan->global_sort_order)->toBe(1);
+});
+
+it('multi-squad view orders epics by global_sort_order', function () {
+    $squad1 = Squad::factory()->for($this->team)->create(['name' => 'Squad 1']);
+    $squad2 = Squad::factory()->for($this->team)->create(['name' => 'Squad 2']);
+
+    // Create epics with specific global_sort_order
+    $epicA = Epic::factory()->for($this->team)->for($this->status)->create(['title' => 'Epic A']);
+    $epicB = Epic::factory()->for($this->team)->for($this->status)->create(['title' => 'Epic B']);
+    $epicC = Epic::factory()->for($this->team)->for($this->status)->create(['title' => 'Epic C']);
+
+    $epicA->squads()->attach($squad1->id);
+    $epicB->squads()->attach($squad1->id);
+    $epicC->squads()->attach($squad1->id);
+
+    // Create out-of-order to verify sorting works
+    EpicQuarterPlan::create(['epic_id' => $epicC->id, 'squad_id' => $squad1->id, 'quarter' => 'Q1-2026', 'global_sort_order' => 0]);
+    EpicQuarterPlan::create(['epic_id' => $epicA->id, 'squad_id' => $squad1->id, 'quarter' => 'Q1-2026', 'global_sort_order' => 1]);
+    EpicQuarterPlan::create(['epic_id' => $epicB->id, 'squad_id' => $squad1->id, 'quarter' => 'Q1-2026', 'global_sort_order' => 2]);
+
+    $component = Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$squad1->id, $squad2->id]);
+
+    $squadData = $component->viewData('squadData');
+    $plannedEpics = $squadData[$squad1->id]['planned_epics'];
+
+    // Should be ordered C, A, B by global_sort_order
+    expect($plannedEpics)->toHaveCount(3)
+        ->and($plannedEpics[0]->id)->toBe($epicC->id)
+        ->and($plannedEpics[1]->id)->toBe($epicA->id)
+        ->and($plannedEpics[2]->id)->toBe($epicB->id);
+});
+
+it('reorderEpicInSquad assigns global_sort_order if null', function () {
+    $squad1 = Squad::factory()->for($this->team)->create(['name' => 'Squad 1']);
+    $squad2 = Squad::factory()->for($this->team)->create(['name' => 'Squad 2']);
+
+    // Epic with no global_sort_order
+    $epic = Epic::factory()->for($this->team)->for($this->status)->create(['title' => 'Epic']);
+    $epic->squads()->attach($squad1->id);
+    $plan = EpicQuarterPlan::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $squad1->id,
+        'quarter' => 'Q1-2026',
+        'global_sort_order' => null,
+    ]);
+
+    // Reorder to position 0
+    Livewire::test('planning.show', ['plan' => null])
+        ->set('selectedQuarter', 'Q1-2026')
+        ->set('selectedSquadIds', [$squad1->id, $squad2->id])
+        ->call('reorderEpicInSquad', $epic->id, $squad1->id, 0);
+
+    $plan->refresh();
+    expect($plan->global_sort_order)->toBe(0);
+});
+
+it('global_sort_order is independent from category sort_order', function () {
+    $squad1 = Squad::factory()->for($this->team)->create(['name' => 'Squad 1']);
+    $squad2 = Squad::factory()->for($this->team)->create(['name' => 'Squad 2']);
+    $category = \App\Models\Category::factory()->for($this->team)->create(['name' => 'Test Category']);
+
+    // Create a plan and verify we can move with category sort_order without affecting global
+    $epic = Epic::factory()->for($this->team)->for($this->status)->create(['title' => 'Epic']);
+    $epic->squads()->attach($squad1->id);
+    $plan = EpicQuarterPlan::create([
+        'epic_id' => $epic->id,
+        'squad_id' => $squad1->id,
+        'quarter' => 'Q1-2026',
+        'category_id' => $category->id,
+        'sort_order' => 5,
+        'global_sort_order' => 10,
+    ]);
+
+    // Use the category-scoped move (Sortable trait)
+    $plan->move(3);
+
+    $plan->refresh();
+    expect($plan->sort_order)->toBe(3)
+        ->and($plan->global_sort_order)->toBe(10); // Should be unchanged
 });

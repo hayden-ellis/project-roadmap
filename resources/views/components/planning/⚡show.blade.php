@@ -517,8 +517,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 $join->on('epics.id', '=', 'es.epic_id')
                     ->where('es.squad_id', '=', $squadId);
             })
-            ->orderByRaw('eqp.sort_order IS NULL, eqp.sort_order ASC')
-            ->select('epics.*', 'eqp.story_points as planned_story_points', 'eqp.sort_order', 'eqp.category_id as plan_category_id', 'es.estimated_story_points')
+            ->orderByRaw('eqp.global_sort_order IS NULL, eqp.global_sort_order ASC')
+            ->select('epics.*', 'eqp.story_points as planned_story_points', 'eqp.sort_order', 'eqp.global_sort_order', 'eqp.category_id as plan_category_id', 'es.estimated_story_points')
             ->get();
     }
 
@@ -876,7 +876,9 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             return;
         }
 
+        // Same squad = reorder within squad (use global_sort_order)
         if ($fromSquadId === $toSquadId) {
+            $this->reorderEpicInSquad($epicId, $toSquadId, $position);
             return;
         }
 
@@ -923,11 +925,35 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             'category_id' => $sourceQuarterPlan->category_id,
         ]);
 
-        // Move to specified position in the target squad
-        $targetQuarterPlan->move($position);
+        // Move to specified global position in the target squad (multi-squad view uses global_sort_order)
+        $targetQuarterPlan->moveGlobal($position);
 
         // Remove from source squad's plan
         $sourceQuarterPlan->delete();
+    }
+
+    /**
+     * Reorder an epic within the same squad (multi-squad view).
+     * Uses global_sort_order which is scoped by squad + quarter only (ignores category).
+     */
+    public function reorderEpicInSquad(int $epicId, int $squadId, int $position): void
+    {
+        $team = Auth::user()->currentTeam;
+        $epic = Epic::where('id', $epicId)->where('team_id', $team->id)->first();
+        if (!$epic) {
+            return;
+        }
+
+        $quarterPlan = EpicQuarterPlan::where('epic_id', $epicId)
+            ->where('squad_id', $squadId)
+            ->where('quarter', $this->selectedQuarter)
+            ->first();
+
+        if (!$quarterPlan) {
+            return;
+        }
+
+        $quarterPlan->moveGlobal($position);
     }
 
     private function authorizeEpic(Epic $epic): void
