@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Lottery;
 
 class EpicQuarterPlan extends Model
 {
@@ -58,6 +59,11 @@ class EpicQuarterPlan extends Model
      */
     public function moveGlobal(int $position): void
     {
+        // Occasionally clean up gaps (1 in 4 chance)
+        Lottery::odds(1, 4)
+            ->winner(fn () => $this->arrangeGlobal())
+            ->choose();
+
         DB::transaction(function () use ($position) {
             $current = $this->global_sort_order;
 
@@ -87,6 +93,20 @@ class EpicQuarterPlan extends Model
 
             // Place at target position
             $this->update(['global_sort_order' => $position]);
+        });
+    }
+
+    /**
+     * Re-sequence all items in global scope to 0, 1, 2, ...
+     */
+    public function arrangeGlobal(): void
+    {
+        DB::transaction(function () {
+            $sortOrder = 0;
+            foreach (static::globalSortable($this)->orderBy('global_sort_order')->get() as $model) {
+                $model->global_sort_order = $sortOrder++;
+                $model->saveQuietly();
+            }
         });
     }
 

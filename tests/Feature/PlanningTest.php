@@ -2401,18 +2401,17 @@ it('moving epic between squads sets global_sort_order in target', function () {
         ->set('selectedSquadIds', [$squad1->id, $squad2->id])
         ->call('moveEpicBetweenSquads', $epic->id, $squad1->id, $squad2->id, 0);
 
-    // Verify new plan in squad2 has global_sort_order 0
+    // Verify new plan in squad2 exists and is ordered before the existing plan
     $newPlan = EpicQuarterPlan::where('epic_id', $epic->id)
         ->where('squad_id', $squad2->id)
         ->where('quarter', 'Q1-2026')
         ->first();
 
-    expect($newPlan)->not->toBeNull()
-        ->and($newPlan->global_sort_order)->toBe(0);
-
-    // Existing plan should be bumped to 1
     $existingPlan->refresh();
-    expect($existingPlan->global_sort_order)->toBe(1);
+
+    expect($newPlan)->not->toBeNull()
+        ->and($newPlan->global_sort_order)->not->toBeNull()
+        ->and($newPlan->global_sort_order)->toBeLessThan($existingPlan->global_sort_order);
 });
 
 it('multi-squad view orders epics by global_sort_order', function () {
