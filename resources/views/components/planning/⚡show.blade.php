@@ -1497,7 +1497,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                         <div class="h-2 w-2 rounded-sm" style="background-color: {{ $catData['category']->color ?? '#6B7280' }}"></div>
                                         <span>{{ $catData['category']->name }}</span>
                                         <span class="tabular-nums font-medium">{{ $catData['actual'] }}</span>
-                                        <span class="text-zinc-400">({{ round(($catData['actual'] / $capacity) * 100) }}%)</span>
+                                        <span class="text-zinc-400">({{ $capacity > 0 ? round(($catData['actual'] / $capacity) * 100) : 0 }}%)</span>
                                     </div>
                                     @endif
                                 @endforeach
