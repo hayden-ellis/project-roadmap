@@ -360,7 +360,6 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     {
         $team = Auth::user()->currentTeam;
         $selectedQuarter = $this->selectedQuarter;
-        $quarterDates = QuarterPlan::getQuarterDates($selectedQuarter);
 
         // Get consideration records with sort_order (already ordered by Sortable trait's global scope)
         $considerations = BacklogConsideration::where('squad_id', $squadId)
@@ -389,18 +388,9 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 $q->where('squad_id', $squadId)
                     ->where('quarter', $selectedQuarter);
             })
-            ->where(function ($query) use ($quarterDates) {
-                // Either squad assignment overlaps the quarter OR has no dates set
-                $query->where(function ($q) use ($quarterDates) {
-                    $q->whereNotNull('es.start_date')
-                        ->whereNotNull('es.end_date')
-                        ->where('es.start_date', '<=', $quarterDates['end'])
-                        ->where('es.end_date', '>=', $quarterDates['start']);
-                })
-                ->orWhere(function ($q) {
-                    $q->whereNull('es.start_date')
-                        ->orWhereNull('es.end_date');
-                });
+            // Show all unfinished epics assigned to this squad (regardless of dates)
+            ->whereHas('status', function ($q) {
+                $q->where('slug', '!=', 'completed');
             })
             ->select('epics.*', 'es.start_date as squad_start_date', 'es.end_date as squad_end_date', 'es.estimated_story_points')
             ->get()
@@ -539,17 +529,9 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             ->whereHas('squads', function ($q) use ($selectedSquadIds) {
                 $q->whereIn('squads.id', $selectedSquadIds);
             })
-            ->where(function ($query) use ($quarterDates) {
-                $query->where(function ($q) use ($quarterDates) {
-                    $q->whereNotNull('start_date')
-                        ->whereNotNull('end_date')
-                        ->where('start_date', '<=', $quarterDates['end'])
-                        ->where('end_date', '>=', $quarterDates['start']);
-                })
-                ->orWhere(function ($q) {
-                    $q->whereNull('start_date')
-                        ->orWhereNull('end_date');
-                });
+            // Show all unfinished epics (regardless of dates)
+            ->whereHas('status', function ($q) {
+                $q->where('slug', '!=', 'completed');
             })
             ->get()
             ->map(function ($epic) use ($selectedSquadIds, $selectedQuarter) {
