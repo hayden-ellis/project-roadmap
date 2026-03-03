@@ -20,6 +20,7 @@ class Epic extends Model
         'description',
         'start_date',
         'end_date',
+        'is_recurring',
     ];
 
     protected function casts(): array
@@ -27,6 +28,7 @@ class Epic extends Model
         return [
             'start_date' => 'date',
             'end_date' => 'date',
+            'is_recurring' => 'boolean',
         ];
     }
 

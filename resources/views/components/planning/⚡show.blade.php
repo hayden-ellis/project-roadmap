@@ -159,7 +159,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $parsed = QuarterPlan::parseQuarter($this->selectedQuarter);
 
         foreach ($this->selectedSquadIds as $squadId) {
-            $this->quarterPlans[$squadId] = QuarterPlan::updateOrCreate(
+            $plan = QuarterPlan::updateOrCreate(
                 [
                     'team_id' => $team->id,
                     'squad_id' => $squadId,
@@ -170,6 +170,30 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     'available_story_points' => $this->editingCapacityValues[$squadId] ?? 0,
                 ]
             );
+
+            $this->quarterPlans[$squadId] = $plan;
+
+            // Auto-add recurring epics that aren't yet planned for this quarter
+            if ($plan->wasRecentlyCreated) {
+                $recurringEpics = Epic::where('team_id', $team->id)
+                    ->where('is_recurring', true)
+                    ->whereHas('squads', fn ($q) => $q->where('squads.id', $squadId))
+                    ->whereDoesntHave('quarterPlans', fn ($q) => $q->where('squad_id', $squadId)->where('quarter', $this->selectedQuarter))
+                    ->with(['squads' => fn ($q) => $q->where('squads.id', $squadId)])
+                    ->get();
+
+                foreach ($recurringEpics as $epic) {
+                    $estimatedPoints = $epic->squads->first()?->pivot?->estimated_story_points;
+
+                    EpicQuarterPlan::create([
+                        'epic_id' => $epic->id,
+                        'squad_id' => $squadId,
+                        'quarter' => $this->selectedQuarter,
+                        'category_id' => $epic->category_id,
+                        'story_points' => $estimatedPoints,
+                    ]);
+                }
+            }
         }
     }
 

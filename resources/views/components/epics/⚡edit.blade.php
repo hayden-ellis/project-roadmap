@@ -29,6 +29,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     #[Validate('required|in:low,medium,high,critical')]
     public string $priority = 'medium';
 
+    public bool $is_recurring = false;
+
     #[Validate('nullable|date')]
     public string $start_date = '';
 
@@ -63,6 +65,9 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     public string $original_end_date = '';
 
     #[Locked]
+    public bool $original_is_recurring = false;
+
+    #[Locked]
     public array $original_squad_ids = [];
 
     #[Locked]
@@ -78,6 +83,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->status_id = (string) $epic->status_id;
         $this->category_id = (string) ($epic->category_id ?? '');
         $this->priority = $epic->priority ?? 'medium';
+        $this->is_recurring = $epic->is_recurring ?? false;
         $this->start_date = $epic->start_date?->format('Y-m-d') ?? '';
         $this->end_date = $epic->end_date?->format('Y-m-d') ?? '';
         $this->squad_ids = $epic->squads()->pluck('squads.id')->map(fn ($id) => (string) $id)->toArray();
@@ -97,6 +103,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->original_status_id = $this->status_id;
         $this->original_category_id = $this->category_id;
         $this->original_priority = $this->priority;
+        $this->original_is_recurring = $this->is_recurring;
         $this->original_start_date = $this->start_date;
         $this->original_end_date = $this->end_date;
         $this->original_squad_ids = $this->squad_ids;
@@ -119,6 +126,9 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             return true;
         }
         if ($this->priority !== $this->original_priority) {
+            return true;
+        }
+        if ($this->is_recurring !== $this->original_is_recurring) {
             return true;
         }
         if ($this->start_date !== $this->original_start_date) {
@@ -229,6 +239,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             'priority' => $this->priority,
             'title' => $this->title,
             'description' => $this->description,
+            'is_recurring' => $this->is_recurring,
             'start_date' => $this->start_date ?: null,
             'end_date' => $this->end_date ?: null,
         ]);
@@ -259,6 +270,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->status_id = $this->original_status_id;
         $this->category_id = $this->original_category_id;
         $this->priority = $this->original_priority;
+        $this->is_recurring = $this->original_is_recurring;
         $this->start_date = $this->original_start_date;
         $this->end_date = $this->original_end_date;
         $this->squad_ids = $this->original_squad_ids;
@@ -357,6 +369,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                             <flux:error name="end_date" />
                         </flux:field>
                     </div>
+
+                    <flux:field>
+                        <flux:switch wire:model.live="is_recurring" label="Recurring" description="Auto-add to future quarter plans when capacity is set up" />
+                    </flux:field>
 
                     @if(!$this->hasUnsavedChanges())
                         <div class="flex items-center justify-between">

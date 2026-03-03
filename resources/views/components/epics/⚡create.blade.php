@@ -26,6 +26,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     #[Validate('required|in:low,medium,high,critical')]
     public string $priority = 'medium';
 
+    public bool $is_recurring = false;
+
     #[Validate('nullable|date')]
     public string $start_date = '';
 
@@ -117,6 +119,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             'description' => $this->description,
             'start_date' => $this->start_date ?: null,
             'end_date' => $this->end_date ?: null,
+            'is_recurring' => $this->is_recurring,
         ]);
 
         // Attach squads with pivot data
@@ -220,6 +223,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                             <flux:error name="end_date" />
                         </flux:field>
                     </div>
+
+                    <flux:field>
+                        <flux:switch wire:model="is_recurring" label="Recurring" description="Auto-add to future quarter plans when capacity is set up" />
+                    </flux:field>
 
                     <div class="flex items-center gap-3">
                         <flux:button type="submit" variant="primary">Create Epic</flux:button>

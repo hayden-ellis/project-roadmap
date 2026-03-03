@@ -41,6 +41,10 @@
                     {{ $epic->status->name }}
                 </flux:badge>
 
+                @if($epic->is_recurring)
+                <flux:badge color="purple" size="sm">Recurring</flux:badge>
+                @endif
+
                 @if($epic->category)
                 <span
                     class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs"
