@@ -28,6 +28,15 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
     public array $categoryTargets = [];
 
+    // Quick Add Epic
+    public bool $showQuickAdd = false;
+    public string $quickAddTitle = '';
+    public string $quickAddStatusId = '';
+    public string $quickAddCategoryId = '';
+    public string $quickAddPriority = 'medium';
+    public array $quickAddSquadIds = [];
+    public array $quickAddStoryPoints = [];
+    public $quickAddInPlan = true;
 
     public function mount(?QuarterPlan $plan = null): void
     {
@@ -962,6 +971,74 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $quarterPlan->moveGlobal($position);
     }
 
+    public function openQuickAdd(): void
+    {
+        $this->showQuickAdd = true;
+        $this->quickAddTitle = '';
+        $this->quickAddStatusId = Status::where('slug', 'not-started')->first()?->id ?? '';
+        $this->quickAddCategoryId = Auth::user()->currentTeam->categories()->default()->first()?->id ?? '';
+        $this->quickAddPriority = 'medium';
+        $this->quickAddSquadIds = $this->selectedSquadIds;
+        $this->quickAddStoryPoints = [];
+        $this->quickAddInPlan = true;
+    }
+
+    public function saveQuickAdd(): void
+    {
+        $this->validate([
+            'quickAddTitle' => 'required|string|max:255',
+            'quickAddStatusId' => 'required|exists:statuses,id',
+            'quickAddCategoryId' => 'nullable|exists:categories,id',
+            'quickAddPriority' => 'required|in:low,medium,high,critical',
+        ]);
+
+        $team = Auth::user()->currentTeam;
+        $parsed = QuarterPlan::parseQuarter($this->selectedQuarter);
+        $startMonth = ($parsed['quarter'] - 1) * 3 + 1;
+        $startDate = Carbon::create($parsed['year'], $startMonth, 1)->startOfMonth();
+        $endDate = $startDate->copy()->addMonths(2)->endOfMonth();
+
+        $epic = Epic::create([
+            'team_id' => $team->id,
+            'status_id' => $this->quickAddStatusId,
+            'category_id' => $this->quickAddCategoryId ?: null,
+            'priority' => $this->quickAddPriority,
+            'title' => $this->quickAddTitle,
+            'start_date' => $startDate,
+            'end_date' => $endDate,
+        ]);
+
+        // Attach to selected squads
+        foreach ($this->quickAddSquadIds as $squadId) {
+            if (! in_array($squadId, $this->selectedSquadIds)) {
+                continue;
+            }
+
+            $points = isset($this->quickAddStoryPoints[$squadId]) && $this->quickAddStoryPoints[$squadId] !== ''
+                ? (int) $this->quickAddStoryPoints[$squadId]
+                : null;
+
+            $epic->squads()->attach($squadId, [
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+                'estimated_story_points' => $points,
+            ]);
+
+            // Add to quarter plan if in-plan
+            if ($this->quickAddInPlan) {
+                EpicQuarterPlan::create([
+                    'epic_id' => $epic->id,
+                    'squad_id' => $squadId,
+                    'quarter' => $this->selectedQuarter,
+                    'category_id' => $this->quickAddCategoryId ?: null,
+                    'story_points' => $points,
+                ]);
+            }
+        }
+
+        $this->showQuickAdd = false;
+    }
+
     private function authorizeEpic(Epic $epic): void
     {
         if ($epic->team_id !== Auth::user()->currentTeam->id) {
@@ -1293,6 +1370,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 <h3 class="text-sm text-zinc-500 dark:text-zinc-400">Available to Add</h3>
                 <div class="flex-1 h-px bg-zinc-200 dark:bg-zinc-800"></div>
                 <flux:badge color="zinc" size="sm">{{ $availableEpics->count() }}</flux:badge>
+                <flux:button size="xs" icon="plus" wire:click="openQuickAdd">New Epic</flux:button>
             </div>
 
             <div class="space-y-1">
@@ -1790,5 +1868,74 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             </div>
             @endif
         @endif
+    @endif
+
+    {{-- Quick Add Epic Modal --}}
+    @if($showQuickAdd)
+    <flux:modal wire:model="showQuickAdd" class="w-full max-w-lg">
+        <div class="space-y-4">
+            <flux:heading size="lg">Quick Add Epic</flux:heading>
+            <flux:text class="text-sm text-zinc-500">Create an epic for {{ $this->selectedQuarter }}</flux:text>
+
+            <flux:input wire:model="quickAddTitle" label="Title" placeholder="Epic title..." autofocus />
+
+            <div class="grid grid-cols-2 gap-4">
+                <flux:select wire:model="quickAddStatusId" label="Status">
+                    @foreach($statuses as $status)
+                        <flux:select.option value="{{ $status->id }}">{{ $status->name }}</flux:select.option>
+                    @endforeach
+                </flux:select>
+
+                <flux:select wire:model="quickAddCategoryId" label="Category">
+                    <flux:select.option value="">None</flux:select.option>
+                    @foreach($allCategories as $cat)
+                        <flux:select.option value="{{ $cat->id }}">{{ $cat->name }}</flux:select.option>
+                    @endforeach
+                </flux:select>
+            </div>
+
+            <flux:select wire:model="quickAddPriority" label="Priority">
+                <flux:select.option value="low">Low</flux:select.option>
+                <flux:select.option value="medium">Medium</flux:select.option>
+                <flux:select.option value="high">High</flux:select.option>
+                <flux:select.option value="critical">Critical</flux:select.option>
+            </flux:select>
+
+            <div>
+                <flux:label class="mb-2">Squads & Story Points</flux:label>
+                <div class="space-y-2">
+                    @foreach($selectedSquads as $squad)
+                    <div class="flex items-center gap-3">
+                        <flux:checkbox
+                            value="{{ $squad->id }}"
+                            wire:model="quickAddSquadIds"
+                            label="{{ $squad->name }}"
+                        />
+                        @if(in_array($squad->id, $this->quickAddSquadIds))
+                        <flux:input
+                            wire:model="quickAddStoryPoints.{{ $squad->id }}"
+                            type="number"
+                            size="sm"
+                            placeholder="Points"
+                            class="w-24"
+                            min="0"
+                        />
+                        @endif
+                    </div>
+                    @endforeach
+                </div>
+            </div>
+
+            <flux:radio.group wire:model="quickAddInPlan" label="Placement">
+                <flux:radio value="1" label="Add to plan" description="Epic will appear in the planned section" />
+                <flux:radio value="0" label="Add to backlog" description="Epic will appear in the available/backlog section" />
+            </flux:radio.group>
+
+            <div class="flex justify-end gap-2 pt-2">
+                <flux:button wire:click="$set('showQuickAdd', false)" variant="ghost">Cancel</flux:button>
+                <flux:button wire:click="saveQuickAdd" variant="primary">Create Epic</flux:button>
+            </div>
+        </div>
+    </flux:modal>
     @endif
 </div>
