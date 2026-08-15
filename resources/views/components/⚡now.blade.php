@@ -124,7 +124,12 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->resetForms();
     }
 
-    public function newEpic(): void
+    /**
+     * From the header button, or an empty column's placeholder. A column
+     * passes its own status, and an active squad filter carries over --
+     * the form opens already saying what the click meant.
+     */
+    public function newEpic(?int $statusId = null): void
     {
         $team = Auth::user()->currentTeam;
 
@@ -136,8 +141,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
         $this->newTitle = '';
         $this->newCategoryId = (string) ($team->categories()->default()->first()?->id ?? '');
-        $this->newSquadId = '';
-        $this->newStatusId = (string) (Status::defaultFor($team)?->id ?? '');
+        $this->newSquadId = in_array($this->squadFilter, ['', 'none'], true) ? '' : $this->squadFilter;
+        $this->newStatusId = (string) ($statusId !== null
+            ? $this->teamStatus($statusId)->id
+            : (Status::defaultFor($team)?->id ?? ''));
         $this->newPriority = 'medium';
         $this->newPlannedPoints = null;
     }
@@ -965,6 +972,22 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     </div>
                     @endforelse
                 </div>
+
+                {{-- A card-shaped invitation at the foot of every column. It
+                     lives outside the drop zone so a drag never mistakes it
+                     for a slot; the flyout opens with this status (and any
+                     squad filter) already picked. --}}
+                <div class="px-2 pb-2">
+                    <button type="button" wire:click="newEpic({{ $status->id }})"
+                            class="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700
+                                   {{ $density === 'compact' ? 'py-2' : 'py-2.5' }}
+                                   text-[13px] font-medium text-zinc-400 dark:text-zinc-500 cursor-pointer transition-colors
+                                   hover:border-zinc-400 dark:hover:border-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300
+                                   hover:bg-zinc-100/60 dark:hover:bg-zinc-800/40">
+                        <flux:icon.plus variant="micro" />
+                        Add epic
+                    </button>
+                </div>
             </section>
             @endforeach
 
@@ -1003,17 +1026,35 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             <flux:input wire:model="newTitle" label="Name" placeholder="Smart Charging Scheduler" autofocus />
 
             <div class="grid grid-cols-2 gap-3">
+                {{-- The dot matches the column header, so the list reads as
+                     a map of the board. --}}
                 <flux:select variant="listbox" wire:model="newStatusId" label="Status">
                     @foreach($statuses as $status)
-                    <flux:select.option value="{{ $status->id }}">{{ $status->name }}</flux:select.option>
+                    <flux:select.option value="{{ $status->id }}">
+                        <div class="flex items-center gap-2">
+                            <span class="size-2.5 rounded-full shrink-0" style="background-color: {{ $status->color }}"></span>
+                            {{ $status->name }}
+                        </div>
+                    </flux:select.option>
                     @endforeach
                 </flux:select>
 
+                {{-- Same glyphs and colours as x-priority-icon, inlined: that
+                     component carries a tooltip, which has no place inside a
+                     listbox option. --}}
                 <flux:select variant="listbox" wire:model="newPriority" label="Priority">
-                    <flux:select.option value="low">Low</flux:select.option>
-                    <flux:select.option value="medium">Medium</flux:select.option>
-                    <flux:select.option value="high">High</flux:select.option>
-                    <flux:select.option value="critical">Critical</flux:select.option>
+                    <flux:select.option value="low">
+                        <div class="flex items-center gap-2"><flux:icon.chevron-down variant="micro" class="text-blue-600 dark:text-blue-400" /> Low</div>
+                    </flux:select.option>
+                    <flux:select.option value="medium">
+                        <div class="flex items-center gap-2"><flux:icon.equal variant="micro" class="text-amber-600 dark:text-amber-400" /> Medium</div>
+                    </flux:select.option>
+                    <flux:select.option value="high">
+                        <div class="flex items-center gap-2"><flux:icon.chevron-up variant="micro" class="text-orange-600 dark:text-orange-400" /> High</div>
+                    </flux:select.option>
+                    <flux:select.option value="critical">
+                        <div class="flex items-center gap-2"><flux:icon.chevrons-up variant="micro" class="text-red-600 dark:text-red-400" /> Critical</div>
+                    </flux:select.option>
                 </flux:select>
             </div>
 
@@ -1088,10 +1129,18 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 </flux:select>
 
                 <flux:select variant="listbox" wire:model.live="editPriority" label="Priority" size="sm">
-                    <flux:select.option value="low">Low</flux:select.option>
-                    <flux:select.option value="medium">Medium</flux:select.option>
-                    <flux:select.option value="high">High</flux:select.option>
-                    <flux:select.option value="critical">Critical</flux:select.option>
+                    <flux:select.option value="low">
+                        <div class="flex items-center gap-2"><flux:icon.chevron-down variant="micro" class="text-blue-600 dark:text-blue-400" /> Low</div>
+                    </flux:select.option>
+                    <flux:select.option value="medium">
+                        <div class="flex items-center gap-2"><flux:icon.equal variant="micro" class="text-amber-600 dark:text-amber-400" /> Medium</div>
+                    </flux:select.option>
+                    <flux:select.option value="high">
+                        <div class="flex items-center gap-2"><flux:icon.chevron-up variant="micro" class="text-orange-600 dark:text-orange-400" /> High</div>
+                    </flux:select.option>
+                    <flux:select.option value="critical">
+                        <div class="flex items-center gap-2"><flux:icon.chevrons-up variant="micro" class="text-red-600 dark:text-red-400" /> Critical</div>
+                    </flux:select.option>
                 </flux:select>
             </div>
 

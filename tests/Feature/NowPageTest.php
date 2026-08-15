@@ -551,6 +551,32 @@ describe('quick-creating an epic', function () {
         ]);
     });
 
+    it('opens prefilled from an empty column with the squad filter carried over', function () {
+        Livewire::test('now')
+            ->set('squadFilter', (string) $this->squad->id)
+            ->call('newEpic', $this->paused->id)
+            ->assertSet('newStatusId', (string) $this->paused->id)
+            ->assertSet('newSquadId', (string) $this->squad->id);
+    });
+
+    it('ignores the no-squad filter when prefilling', function () {
+        Livewire::test('now')
+            ->set('squadFilter', 'none')
+            ->call('newEpic')
+            ->assertSet('newSquadId', '');
+    });
+
+    it('refuses to open into another team\'s column', function () {
+        $otherUser = User::factory()->withPersonalTeam()->create();
+        $foreignStatus = Status::create([
+            'team_id' => $otherUser->currentTeam->id, 'name' => 'Theirs', 'color' => '#000',
+        ]);
+
+        Livewire::test('now')
+            ->call('newEpic', $foreignStatus->id)
+            ->assertForbidden();
+    });
+
     it('can be created straight into any column', function () {
         Livewire::test('now')
             ->call('newEpic')

@@ -233,10 +233,18 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     <form wire:submit="quickAdd" class="flex flex-col sm:flex-row gap-2 mb-6">
         <flux:input wire:model="newTitle" placeholder="Add an epic…" class="flex-1" />
         <flux:select variant="listbox" wire:model="newPriority" class="w-full sm:w-36">
-            <flux:select.option value="low">Low</flux:select.option>
-            <flux:select.option value="medium">Medium</flux:select.option>
-            <flux:select.option value="high">High</flux:select.option>
-            <flux:select.option value="critical">Critical</flux:select.option>
+            <flux:select.option value="low">
+                <div class="flex items-center gap-2"><flux:icon.chevron-down variant="micro" class="text-blue-600 dark:text-blue-400" /> Low</div>
+            </flux:select.option>
+            <flux:select.option value="medium">
+                <div class="flex items-center gap-2"><flux:icon.equal variant="micro" class="text-amber-600 dark:text-amber-400" /> Medium</div>
+            </flux:select.option>
+            <flux:select.option value="high">
+                <div class="flex items-center gap-2"><flux:icon.chevron-up variant="micro" class="text-orange-600 dark:text-orange-400" /> High</div>
+            </flux:select.option>
+            <flux:select.option value="critical">
+                <div class="flex items-center gap-2"><flux:icon.chevrons-up variant="micro" class="text-red-600 dark:text-red-400" /> Critical</div>
+            </flux:select.option>
         </flux:select>
         <flux:button type="submit" icon="plus" variant="primary">Add</flux:button>
     </form>
