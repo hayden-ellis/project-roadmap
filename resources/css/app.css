@@ -41,7 +41,38 @@
   If we ever want to remove these styles, we need to add an explicit border
   color utility to any element that depends on these defaults.
 */
+/*
+  Drag-and-drop, Trello-style. The classes come from SortableJS via Alpine's
+  x-sort plugin: the clone following the cursor tilts and lifts, while the
+  slot it would land in dims to a quiet placeholder. Needs forceFallback on
+  the x-sort container -- the browser's native drag image cannot be styled.
+*/
+@layer components {
+  .sortable-drag {
+    @apply rotate-3 shadow-xl opacity-100!;
+  }
+
+  .sortable-ghost {
+    @apply border-dashed border-zinc-300 bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800/60;
+  }
+
+  .sortable-ghost > * {
+    visibility: hidden;
+  }
+}
+
+/* The plugin flags the body while a drag is live. */
+body.sorting,
+body.sorting * {
+  cursor: grabbing !important;
+}
+
 @layer base {
+  /* Alpine hides these until it boots, so nothing flashes on first paint. */
+  [x-cloak] {
+    display: none !important;
+  }
+
   *,
   ::after,
   ::before,

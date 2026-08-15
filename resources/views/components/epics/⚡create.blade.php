@@ -1,10 +1,11 @@
 <?php
 
-use App\Models\Category;
 use App\Models\Epic;
-use App\Models\Squad;
 use App\Models\Status;
+use App\Models\EpicQuarterPlan;
+use App\Support\Quarter;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Validate;
 use Livewire\Component;
@@ -34,296 +35,164 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     #[Validate('nullable|date|after_or_equal:start_date')]
     public string $end_date = '';
 
+    /** Quarter the epic is being planned into, as "2026-Q3". */
+    public string $quarter = '';
+
     #[Validate('nullable|array')]
     public array $squad_ids = [];
 
-    public array $squad_data = [];
+    /** squadId => planned points */
+    public array $planned_points = [];
 
     public function mount(): void
     {
-        $this->status_id = Status::where('slug', 'not-started')->first()?->id ?? '';
-        // Default to the team's default category
-        $this->category_id = Auth::user()->currentTeam->categories()->default()->first()?->id ?? '';
+        $team = Auth::user()->currentTeam;
+
+        $this->category_id = (string) ($team->categories()->default()->first()?->id ?? '');
+        $this->status_id = (string) (Status::defaultFor($team)?->id ?? '');
+        $this->quarter = Quarter::current()->key();
     }
 
     public function updatedSquadIds(): void
     {
-        // When a squad is added, pre-populate with epic dates if they exist
         foreach ($this->squad_ids as $squadId) {
-            if (! isset($this->squad_data[$squadId])) {
-                $this->squad_data[$squadId] = [
-                    'start_date' => $this->start_date,
-                    'end_date' => $this->end_date,
-                    'estimated_story_points' => 25,
-                ];
-            }
+            $this->planned_points[$squadId] ??= 25;
         }
-    }
-
-    public function copyDatesToAllSquads(): void
-    {
-        // Copy epic dates to all selected squads
-        foreach ($this->squad_ids as $squadId) {
-            $this->squad_data[$squadId]['start_date'] = $this->start_date;
-            $this->squad_data[$squadId]['end_date'] = $this->end_date;
-        }
-    }
-
-    public function applyQuarterPreset(int $squadId, string $preset): void
-    {
-        if (! isset($this->squad_data[$squadId])) {
-            $this->squad_data[$squadId] = [
-                'start_date' => '',
-                'end_date' => '',
-                'estimated_story_points' => 25,
-            ];
-        }
-
-        $now = \Carbon\Carbon::now();
-        $currentQuarter = ceil($now->month / 3);
-        $currentYear = $now->year;
-
-        if ($preset === 'this-quarter') {
-            $startMonth = ($currentQuarter - 1) * 3 + 1;
-            $startDate = \Carbon\Carbon::create($currentYear, $startMonth, 1)->startOfMonth();
-            $endDate = $startDate->copy()->addMonths(2)->endOfMonth();
-        } else {
-            // next-quarter
-            if ($currentQuarter === 4) {
-                $startMonth = 1;
-                $year = $currentYear + 1;
-            } else {
-                $startMonth = ($currentQuarter * 3) + 1;
-                $year = $currentYear;
-            }
-            $startDate = \Carbon\Carbon::create($year, $startMonth, 1)->startOfMonth();
-            $endDate = $startDate->copy()->addMonths(2)->endOfMonth();
-        }
-
-        $this->squad_data[$squadId]['start_date'] = $startDate->format('Y-m-d');
-        $this->squad_data[$squadId]['end_date'] = $endDate->format('Y-m-d');
     }
 
     public function save(): void
     {
         $this->authorize('create', Epic::class);
-
         $this->validate();
 
-        $epic = Epic::create([
-            'team_id' => Auth::user()->currentTeam->id,
-            'status_id' => $this->status_id,
-            'category_id' => $this->category_id ?: null,
-            'priority' => $this->priority,
-            'title' => $this->title,
-            'description' => $this->description,
-            'start_date' => $this->start_date ?: null,
-            'end_date' => $this->end_date ?: null,
-            'is_recurring' => $this->is_recurring,
-        ]);
+        $quarter = Quarter::parse($this->quarter);
 
-        // Attach squads with pivot data
-        $attachData = [];
-        foreach ($this->squad_ids as $squadId) {
-            $estimatedPoints = $this->squad_data[$squadId]['estimated_story_points'] ?? '';
-            $startDate = $this->squad_data[$squadId]['start_date'] ?? '';
-            $endDate = $this->squad_data[$squadId]['end_date'] ?? '';
-            $attachData[$squadId] = [
-                'start_date' => $startDate !== '' ? $startDate : null,
-                'end_date' => $endDate !== '' ? $endDate : null,
-                'estimated_story_points' => $estimatedPoints !== '' && $estimatedPoints !== null ? (int) $estimatedPoints : null,
-            ];
-        }
+        DB::transaction(function () use ($quarter) {
+            $epic = Epic::create([
+                'team_id' => Auth::user()->currentTeam->id,
+                'category_id' => $this->category_id ?: null,
+                'title' => $this->title,
+                'description' => $this->description,
+                'status_id' => $this->status_id ?: null,
+                'priority' => $this->priority,
+                'start_date' => $this->start_date ?: null,
+                'end_date' => $this->end_date ?: null,
+                'is_recurring' => $this->is_recurring,
+            ]);
 
-        $epic->squads()->attach($attachData);
+            foreach ($this->squad_ids as $squadId) {
+                EpicQuarterPlan::create([
+                    'epic_id' => $epic->id,
+                    'squad_id' => $squadId,
+                    'year' => $quarter->year,
+                    'quarter' => $quarter->quarter,
+                    'planned_points' => $this->planned_points[$squadId] ?: null,
+                ]);
+            }
+        });
 
         $this->redirect('/epics', navigate: true);
     }
 
     public function with(): array
     {
+        $team = Auth::user()->currentTeam;
+
         return [
-            'statuses' => Status::orderBy('order')->get(),
-            'squads' => Auth::user()->currentTeam->squads()->orderBy('name')->get(),
-            'categories' => Auth::user()->currentTeam->categories()->ordered()->get(),
+            'squads' => $team->squads()->ordered()->get(),
+            'categories' => $team->categories()->ordered()->get(),
+            'statuses' => $team->statuses()->ordered()->get(),
+            'quarters' => Quarter::current()->previous()->through(9),
         ];
     }
 };
 ?>
 
-<div class="max-w-7xl">
-    <form wire:submit="save">
-        <div class="pb-4">
-            <flux:button href="/epics" variant="ghost" icon="arrow-left" wire:navigate class="mb-3">Back to Epics</flux:button>
-        </div>
+<div class="max-w-3xl">
+    <div class="pt-8 pb-10">
+        <h1>Create Epic</h1>
+        <flux:text class="mt-1">Describe the work, then plan it into a squad's quarter.</flux:text>
+    </div>
 
-        <h1 class="mb-6">Create Epic</h1>
+    <form wire:submit="save" class="space-y-6">
+        <flux:card class="space-y-6">
+            <flux:input wire:model="title" label="Title" placeholder="Smart Charging Scheduler" required />
 
-        <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
-            <!-- Main Form (2/3 width on large screens) -->
-            <div class="xl:col-span-2">
-                <flux:card class="space-y-6">
-                    <flux:field>
-                        <flux:label>Title</flux:label>
-                        <flux:input wire:model="title" placeholder="e.g., Payment Gateway Integration" />
-                        <flux:error name="title" />
-                    </flux:field>
+            <flux:textarea wire:model="description" label="Description" rows="3"
+                           placeholder="What is this work, and why now?" />
 
-                    <flux:field>
-                        <flux:label>Description</flux:label>
-                        <flux:textarea wire:model="description" placeholder="Describe this epic..." rows="4" />
-                        <flux:error name="description" />
-                    </flux:field>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <flux:select wire:model="status_id" label="Status">
+                    @foreach($statuses as $status)
+                    <flux:select.option value="{{ $status->id }}">{{ $status->name }}</flux:select.option>
+                    @endforeach
+                </flux:select>
 
-                    <div class="grid grid-cols-2 gap-4">
-                        <flux:field>
-                            <flux:label>Status</flux:label>
-                            <flux:select wire:model="status_id">
-                                @foreach($statuses as $status)
-                                    <option value="{{ $status->id }}">{{ $status->name }}</option>
-                                @endforeach
-                            </flux:select>
-                            <flux:error name="status_id" />
-                        </flux:field>
+                <flux:select wire:model="priority" label="Priority">
+                    <flux:select.option value="low">Low</flux:select.option>
+                    <flux:select.option value="medium">Medium</flux:select.option>
+                    <flux:select.option value="high">High</flux:select.option>
+                    <flux:select.option value="critical">Critical</flux:select.option>
+                </flux:select>
 
-                        <flux:field>
-                            <flux:label>Priority</flux:label>
-                            <flux:select wire:model="priority">
-                                <option value="low">Low</option>
-                                <option value="medium">Medium</option>
-                                <option value="high">High</option>
-                                <option value="critical">Critical</option>
-                            </flux:select>
-                            <flux:error name="priority" />
-                        </flux:field>
-                    </div>
-
-                    <flux:field>
-                        <flux:label>Category</flux:label>
-                        <flux:select wire:model="category_id">
-                            <option value="">Select a category</option>
-                            @foreach($categories as $category)
-                                <option value="{{ $category->id }}">{{ $category->name }}</option>
-                            @endforeach
-                        </flux:select>
-                        <flux:description>Categorize this epic by type of work</flux:description>
-                        <flux:error name="category_id" />
-                    </flux:field>
-
-                    <div class="grid grid-cols-2 gap-4">
-                        <flux:field>
-                            <flux:label>Start Date</flux:label>
-                            <flux:input type="date" wire:model="start_date" />
-                            <flux:error name="start_date" />
-                        </flux:field>
-
-                        <flux:field>
-                            <flux:label>End Date</flux:label>
-                            <flux:input type="date" wire:model="end_date" />
-                            <flux:error name="end_date" />
-                        </flux:field>
-                    </div>
-
-                    <flux:field>
-                        <flux:switch wire:model="is_recurring" label="Recurring" description="Auto-add to future quarter plans when capacity is set up" />
-                    </flux:field>
-
-                    <div class="flex items-center gap-3">
-                        <flux:button type="submit" variant="primary">Create Epic</flux:button>
-                        <flux:button href="/epics" variant="ghost" wire:navigate>Cancel</flux:button>
-                    </div>
-                </flux:card>
+                <flux:select wire:model="category_id" label="Category" placeholder="None">
+                    @foreach($categories as $category)
+                    <flux:select.option value="{{ $category->id }}">{{ $category->name }}</flux:select.option>
+                    @endforeach
+                </flux:select>
             </div>
 
-            <!-- Squads Sidebar (1/3 width on large screens) -->
-            <div class="xl:col-span-1">
-                <flux:card>
-                    <div class="flex items-center justify-between mb-4">
-                        <flux:heading size="lg">Squads</flux:heading>
-                        @if(!empty($squad_ids) && ($start_date || $end_date))
-                            <flux:button 
-                                wire:click="copyDatesToAllSquads" 
-                                variant="ghost" 
-                                size="xs"
-                                icon="arrow-down">
-                                Copy Dates
-                            </flux:button>
-                        @endif
-                    </div>
-                    
-                    @if($squads->isEmpty())
-                        <flux:callout icon="information-circle" class="text-sm">
-                            <flux:callout.text>
-                                No squads created yet. You can <a href="/squads/create" wire:navigate class="underline font-medium">create a squad first</a>.
-                            </flux:callout.text>
-                        </flux:callout>
-                    @else
-                        <div class="space-y-4">
-                            @foreach($squads as $squad)
-                                <div class="border border-zinc-200 dark:border-zinc-700 rounded-lg p-4">
-                                    <label class="flex items-center gap-3 cursor-pointer mb-3">
-                                        <input type="checkbox" wire:model.live="squad_ids" value="{{ $squad->id }}" class="rounded border-zinc-300 dark:border-zinc-700" />
-                                        <div class="h-4 w-4 rounded" style="background-color: {{ $squad->color }}"></div>
-                                        <span class="flex-1 font-medium">{{ $squad->name }}</span>
-                                    </label>
-                                    
-                                    @if(in_array((string)$squad->id, $squad_ids))
-                                        <div class="ml-7 space-y-3 pt-3 border-t border-zinc-200 dark:border-zinc-700">
-                                            <!-- Quarter Presets -->
-                                            <div class="flex flex-wrap items-center gap-2 mb-2">
-                                                <flux:text class="text-xs text-zinc-600 dark:text-zinc-400 mr-1">Quick presets:</flux:text>
-                                                <flux:button 
-                                                    wire:click="applyQuarterPreset({{ $squad->id }}, 'this-quarter')" 
-                                                    variant="ghost" 
-                                                    size="xs"
-                                                    class="h-6 text-xs">
-                                                    This Q
-                                                </flux:button>
-                                                <flux:button 
-                                                    wire:click="applyQuarterPreset({{ $squad->id }}, 'next-quarter')" 
-                                                    variant="ghost" 
-                                                    size="xs"
-                                                    class="h-6 text-xs">
-                                                    Next Q
-                                                </flux:button>
-                                            </div>
-                                            <div class="space-y-2">
-                                                <div>
-                                                    <flux:label class="text-xs">Start Date</flux:label>
-                                                    <flux:input type="date" wire:model="squad_data.{{ $squad->id }}.start_date" class="text-sm" />
-                                                </div>
-                                                <div>
-                                                    <flux:label class="text-xs">End Date</flux:label>
-                                                    <flux:input type="date" wire:model="squad_data.{{ $squad->id }}.end_date" class="text-sm" />
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <flux:label class="text-xs">Total Estimate (Story Points)</flux:label>
-                                                <flux:description class="text-xs !mt-0 mb-1">{{ $squad->name }}'s full effort for this epic</flux:description>
-                                                <div class="flex items-center gap-3">
-                                                    <flux:slider
-                                                        wire:model="squad_data.{{ $squad->id }}.estimated_story_points"
-                                                        min="0"
-                                                        max="250"
-                                                        step="5"
-                                                    />
-                                                    <flux:input
-                                                        wire:model="squad_data.{{ $squad->id }}.estimated_story_points"
-                                                        type="number"
-                                                        size="sm"
-                                                        class="max-w-20"
-                                                    />
-                                                </div>
-                                            </div>
-                                        </div>
-                                    @endif
-                                </div>
-                            @endforeach
-                        </div>
-                    @endif
-                    <flux:error name="squad_ids" />
-                </flux:card>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <flux:input type="date" wire:model="start_date" label="Start date" />
+                <flux:input type="date" wire:model="end_date" label="End date" />
             </div>
+
+            <flux:checkbox wire:model="is_recurring" label="Recurring"
+                           description="Re-plan this epic into each new quarter automatically." />
+        </flux:card>
+
+        <flux:card class="space-y-6">
+            <div>
+                <flux:heading size="lg">Planning</flux:heading>
+                <flux:text class="mt-1">
+                    Squads carry no capacity of their own — it comes from the engineers on them.
+                    The estimate here is what you think the work will take.
+                </flux:text>
+            </div>
+
+            <flux:select wire:model="quarter" label="Quarter">
+                @foreach($quarters as $option)
+                <flux:select.option value="{{ $option->key() }}">{{ $option->label() }}</flux:select.option>
+                @endforeach
+            </flux:select>
+
+            <flux:select multiple variant="listbox" wire:model.live="squad_ids"
+                         label="Squads" placeholder="Select squads">
+                @foreach($squads as $squad)
+                <flux:select.option value="{{ $squad->id }}">{{ $squad->name }}</flux:select.option>
+                @endforeach
+            </flux:select>
+
+            @if(! empty($squad_ids))
+            <div class="space-y-3">
+                @foreach($squads->whereIn('id', $squad_ids) as $squad)
+                <div class="flex items-center gap-4 rounded-lg border border-zinc-200 dark:border-zinc-700 px-4 py-3">
+                    <span class="inline-flex items-center gap-2 min-w-0 flex-1">
+                        <div class="h-2.5 w-2.5 rounded-full shrink-0" style="background-color: {{ $squad->color }}"></div>
+                        <flux:text class="font-medium truncate">{{ $squad->name }}</flux:text>
+                    </span>
+                    <flux:input type="number" min="0" class="w-32"
+                                wire:model="planned_points.{{ $squad->id }}"
+                                placeholder="Points" />
+                </div>
+                @endforeach
+            </div>
+            @endif
+        </flux:card>
+
+        <div class="flex items-center gap-3">
+            <flux:button type="submit" variant="primary">Create Epic</flux:button>
+            <flux:button href="/epics" variant="ghost" wire:navigate>Cancel</flux:button>
         </div>
     </form>
 </div>

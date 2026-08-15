@@ -21,6 +21,7 @@ class Team extends JetstreamTeam
     protected $fillable = [
         'name',
         'personal_team',
+        'week_starts_on',
     ];
 
     /**
@@ -43,6 +44,7 @@ class Team extends JetstreamTeam
     {
         return [
             'personal_team' => 'boolean',
+            'week_starts_on' => 'integer',
         ];
     }
 
@@ -56,13 +58,28 @@ class Team extends JetstreamTeam
         return $this->hasMany(Epic::class);
     }
 
-    public function quarterPlans(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function engineers(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
-        return $this->hasMany(QuarterPlan::class);
+        return $this->hasMany(Engineer::class);
     }
 
     public function categories(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
         return $this->hasMany(Category::class);
+    }
+
+    public function statuses(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(Status::class);
+    }
+
+    public function capacity(): \App\Services\CapacityService
+    {
+        return \App\Services\CapacityService::for($this);
+    }
+
+    public function weekCalendar(): \App\Support\WeekCalendar
+    {
+        return \App\Support\WeekCalendar::forTeam($this);
     }
 }

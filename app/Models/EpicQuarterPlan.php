@@ -2,128 +2,57 @@
 
 namespace App\Models;
 
+use App\Support\Quarter;
 use App\Traits\Sortable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Lottery;
 
+/**
+ * An epic scheduled into a squad's quarter, with the estimate and the
+ * manually maintained actual.
+ *
+ * The old dual sort_order / global_sort_order pair is gone: ordering is now
+ * scoped to squad + quarter only, because category no longer subdivides a
+ * quarter's capacity.
+ */
 class EpicQuarterPlan extends Model
 {
+    /** @use HasFactory<\Database\Factories\EpicQuarterPlanFactory> */
     use HasFactory, Sortable;
 
     protected $fillable = [
         'epic_id',
-        'category_id',
         'squad_id',
+        'year',
         'quarter',
-        'story_points',
+        'planned_points',
+        'delivered_points',
         'sort_order',
-        'global_sort_order',
     ];
 
     protected function casts(): array
     {
         return [
-            'story_points' => 'integer',
+            'year' => 'integer',
+            'quarter' => 'integer',
+            'planned_points' => 'integer',
+            'delivered_points' => 'integer',
             'sort_order' => 'integer',
-            'global_sort_order' => 'integer',
         ];
     }
 
-    /**
-     * Sortable scope: order within squad + quarter + category.
-     * Used by the Sortable trait for single-squad view ordering.
-     */
+    /** Sortable scope: ordering runs within one squad's quarter. */
     public function scopeSortable($query, $model): mixed
     {
         return $query->where('squad_id', $model->squad_id)
-                     ->where('quarter', $model->quarter)
-                     ->where('category_id', $model->category_id);
+            ->where('year', $model->year)
+            ->where('quarter', $model->quarter);
     }
 
-    /**
-     * Global sortable scope: order within squad + quarter only (ignores category).
-     * Used for multi-squad view ordering.
-     */
-    public function scopeGlobalSortable($query, $model): mixed
+    public function scopeForQuarter($query, Quarter $quarter)
     {
-        return $query->where('squad_id', $model->squad_id)
-                     ->where('quarter', $model->quarter);
-    }
-
-    /**
-     * Move this model to a new global position within squad + quarter scope.
-     * This is separate from the category-scoped move() method from Sortable trait.
-     */
-    public function moveGlobal(int $position): void
-    {
-        // Occasionally clean up gaps (1 in 4 chance)
-        Lottery::odds(1, 4)
-            ->winner(fn () => $this->arrangeGlobal())
-            ->choose();
-
-        DB::transaction(function () use ($position) {
-            $current = $this->global_sort_order;
-
-            // If no global_sort_order yet, assign one at the end first
-            if ($current === null) {
-                $max = static::globalSortable($this)->max('global_sort_order') ?? -1;
-                $current = $max + 1;
-                $this->update(['global_sort_order' => $current]);
-            }
-
-            if ($current === $position) {
-                return;
-            }
-
-            // Temporarily move out of the way
-            $this->update(['global_sort_order' => -1]);
-
-            // Shift items between current and target positions
-            $block = static::globalSortable($this)->whereBetween('global_sort_order', [
-                min($current, $position),
-                max($current, $position),
-            ]);
-
-            $current < $position
-                ? $block->decrement('global_sort_order')
-                : $block->increment('global_sort_order');
-
-            // Place at target position
-            $this->update(['global_sort_order' => $position]);
-        });
-    }
-
-    /**
-     * Re-sequence all items in global scope to 0, 1, 2, ...
-     */
-    public function arrangeGlobal(): void
-    {
-        DB::transaction(function () {
-            $sortOrder = 0;
-            foreach (static::globalSortable($this)->orderBy('global_sort_order')->get() as $model) {
-                $model->global_sort_order = $sortOrder++;
-                $model->saveQuietly();
-            }
-        });
-    }
-
-    /**
-     * Assign global_sort_order if not set (appends to end of squad+quarter scope).
-     */
-    public function ensureGlobalSortOrder(): void
-    {
-        if ($this->global_sort_order === null) {
-            $max = static::globalSortable($this)->max('global_sort_order') ?? -1;
-            $this->update(['global_sort_order' => $max + 1]);
-        }
-    }
-
-    public function category(): BelongsTo
-    {
-        return $this->belongsTo(Category::class);
+        return $query->where('year', $quarter->year)->where('quarter', $quarter->quarter);
     }
 
     public function epic(): BelongsTo
@@ -134,5 +63,20 @@ class EpicQuarterPlan extends Model
     public function squad(): BelongsTo
     {
         return $this->belongsTo(Squad::class);
+    }
+
+    public function toQuarter(): Quarter
+    {
+        return new Quarter($this->year, $this->quarter);
+    }
+
+    /** Points still outstanding against the estimate, or null if not tracked. */
+    public function remainingPoints(): ?int
+    {
+        if ($this->planned_points === null) {
+            return null;
+        }
+
+        return max(0, $this->planned_points - ($this->delivered_points ?? 0));
     }
 }

@@ -1,168 +1,143 @@
 <?php
 
-use App\Models\Epic;
-use App\Models\Squad;
+use App\Services\CapacityService;
+use App\Support\Quarter;
+use Carbon\CarbonImmutable;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\Url;
 use Livewire\Component;
 
 new #[Layout('components.layouts.app.sidebar')] class extends Component
 {
-    public string $start_date = '';
-    public string $end_date = '';
+    #[Url]
     public array $selected_squads = [];
+
+    #[Url]
+    public string $quarter = '';
 
     public function mount(): void
     {
-        $this->start_date = now()->startOfMonth()->format('Y-m-d');
-        $this->end_date = now()->addMonths(6)->endOfMonth()->format('Y-m-d');
+        $this->quarter = $this->quarter ?: Quarter::current()->key();
     }
 
     public function with(): array
     {
-        $query = auth()->user()->currentTeam
-            ->epics()
-            ->with(['status', 'squads', 'stories.status', 'stories.squad'])
-            ->whereNotNull('start_date')
-            ->whereNotNull('end_date');
+        $team = auth()->user()->currentTeam;
+        $capacity = CapacityService::for($team);
+        $quarter = Quarter::parse($this->quarter);
 
-        if ($this->start_date) {
-            $query->where('end_date', '>=', $this->start_date);
+        $query = $team->epics()->with(['category', 'status', 'quarterPlans.squad']);
+
+        if (! empty($this->selected_squads)) {
+            $query->whereHas('quarterPlans', fn ($q) => $q->whereIn('squad_id', $this->selected_squads));
         }
 
-        if ($this->end_date) {
-            $query->where('start_date', '<=', $this->end_date);
-        }
+        $epics = $query->get();
+        $spans = $capacity->epicSpans($epics->pluck('id'));
 
-        if (!empty($this->selected_squads)) {
-            $query->whereHas('squads', function ($q) {
-                $q->whereIn('squads.id', $this->selected_squads);
+        // Only epics with real staffing can be drawn on a timeline.
+        $epics = $epics
+            ->filter(fn ($e) => isset($spans[$e->id]))
+            ->sortBy(fn ($e) => $spans[$e->id]['start'])
+            ->values()
+            ->map(function ($epic) use ($spans) {
+                $epic->span = $spans[$epic->id];
+
+                return $epic;
             });
-        }
 
-        $epics = $query->orderBy('start_date')->get();
-
-        $squads = auth()->user()->currentTeam->squads()->orderBy('name')->get();
+        $rangeStart = $epics->min(fn ($e) => $e->span['start']) ?? $quarter->start();
+        $rangeEnd = $epics->max(fn ($e) => $e->span['end']) ?? $quarter->end();
 
         return [
             'epics' => $epics,
-            'squads' => $squads,
+            'squads' => $team->squads()->ordered()->get(),
+            'rangeStart' => CarbonImmutable::parse($rangeStart),
+            'rangeEnd' => CarbonImmutable::parse($rangeEnd),
+            'quarters' => Quarter::current()->previous()->through(6),
+            'currentWeek' => $capacity->currentWeek(),
         ];
     }
 };
 ?>
 
 <div>
-    <div class="flex items-center justify-between pt-8 pb-10">
-        <div class="flex items-center gap-4">
-            <h1>Roadmap Timeline</h1>
-            <x-roadmap-navigation currentView="timeline" />
-        </div>
+    <div class="pt-8 pb-6">
+        <h1>Timeline</h1>
+        <flux:text class="mt-1">Bars show when people are actually booked, not planned dates.</flux:text>
     </div>
 
-    <flux:card class="mb-6">
-            <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <flux:field>
-                    <flux:label>Start Date</flux:label>
-                    <flux:input type="date" wire:model.live="start_date" />
-                </flux:field>
+    <x-roadmap-navigation />
 
-                <flux:field>
-                    <flux:label>End Date</flux:label>
-                    <flux:input type="date" wire:model.live="end_date" />
-                </flux:field>
+    <div class="flex flex-wrap items-center gap-2 my-6">
+        @foreach($squads as $squad)
+        <label class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer transition-colors {{ in_array($squad->id, $selected_squads) ? 'border-zinc-400 dark:border-zinc-500 bg-zinc-100 dark:bg-zinc-800' : 'border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800' }}">
+            <input type="checkbox" wire:model.live="selected_squads" value="{{ $squad->id }}" class="rounded border-zinc-300 dark:border-zinc-700" />
+            <div class="h-2.5 w-2.5 rounded-full" style="background-color: {{ $squad->color }}"></div>
+            <span class="text-sm">{{ $squad->name }}</span>
+        </label>
+        @endforeach
+    </div>
 
-                <flux:field>
-                    <flux:label>Filter by Squads</flux:label>
-                    <div class="flex flex-wrap gap-2 mt-2">
-                        @foreach($squads as $squad)
-                        <label class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer transition-colors {{ in_array($squad->id, $selected_squads) ? 'border-zinc-400 dark:border-zinc-500 bg-zinc-100 dark:bg-zinc-800' : 'border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800' }}">
-                            <input type="checkbox" wire:model.live="selected_squads" value="{{ $squad->id }}" class="rounded border-zinc-300 dark:border-zinc-700" />
-                            <div class="h-3 w-3 rounded-full" style="background-color: {{ $squad->color }}"></div>
-                            <span class="text-sm">{{ $squad->name }}</span>
-                        </label>
-                        @endforeach
-                    </div>
-                </flux:field>
+    @if($epics->isEmpty())
+    <flux:card>
+        <div class="text-center py-12">
+            <flux:icon.calendar class="mx-auto h-12 w-12 text-zinc-400" />
+            <flux:heading size="lg" class="mt-4">Nothing staffed yet</flux:heading>
+            <flux:text class="mt-2">Assign engineers to epics in Planning and they'll appear here.</flux:text>
+        </div>
+    </flux:card>
+    @else
+    @php
+        $totalDays = max(1, $rangeStart->diffInDays($rangeEnd));
+    @endphp
+
+    <flux:card class="overflow-x-auto">
+        <div class="min-w-[720px] space-y-3">
+            <div class="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400 pb-2 border-b border-zinc-200 dark:border-zinc-700">
+                <span>{{ $rangeStart->format('M j, Y') }}</span>
+                <span>{{ $rangeEnd->format('M j, Y') }}</span>
             </div>
-        </flux:card>
 
-        @if($epics->isEmpty())
-        <flux:card>
-            <div class="text-center py-12">
-                <flux:icon.calendar class="mx-auto h-12 w-12 text-zinc-400" />
-                <flux:heading size="lg" class="mt-4">No epics in this date range</flux:heading>
-                <flux:text class="mt-2">Adjust your filters or create a new epic.</flux:text>
-                <flux:button href="/epics/create" variant="primary" class="mt-6" wire:navigate>Create Epic</flux:button>
-            </div>
-        </flux:card>
-        @else
-        <div class="space-y-6">
             @foreach($epics as $epic)
-            <flux:card>
-                <div class="space-y-4">
-                    <div class="flex items-start justify-between gap-4">
-                        <div class="flex-1">
-                            <div class="flex items-center gap-3 mb-2">
-                                <flux:heading size="lg">{{ $epic->title }}</flux:heading>
-                                <flux:badge :color="$epic->status->slug === 'completed' ? 'green' : ($epic->status->slug === 'in-progress' ? 'blue' : ($epic->status->slug === 'blocked' ? 'red' : 'zinc'))">
-                                    {{ $epic->status->name }}
-                                </flux:badge>
-                            </div>
-                            <flux:text class="text-sm text-zinc-500 dark:text-zinc-400">
-                                {{ $epic->start_date->format('M j, Y') }} - {{ $epic->end_date->format('M j, Y') }}
-                                ({{ $epic->start_date->diffInDays($epic->end_date) }} days)
-                            </flux:text>
-                            <div class="flex items-center gap-2 mt-2">
-                                @foreach($epic->squads as $squad)
-                                <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium" style="background-color: {{ $squad->color }}20; color: {{ $squad->color }}">
-                                    <div class="h-2 w-2 rounded-full" style="background-color: {{ $squad->color }}"></div>
-                                    {{ $squad->name }}
-                                </span>
-                                @endforeach
-                            </div>
-                        </div>
-                        <flux:button href="/epics/{{ $epic->id }}/edit" variant="ghost" size="sm" wire:navigate>Edit</flux:button>
-                    </div>
+            @php
+                $offsetDays = $rangeStart->diffInDays($epic->span['start']);
+                $spanDays = max(1, $epic->span['start']->diffInDays($epic->span['end']));
+                $leftPercent = ($offsetDays / $totalDays) * 100;
+                $widthPercent = max(2, ($spanDays / $totalDays) * 100);
+                $squad = $epic->quarterPlans->first()?->squad;
+                $color = $squad->color ?? '#6B7280';
+            @endphp
 
-                    <div class="w-full h-8 bg-zinc-100 dark:bg-zinc-800 rounded-lg overflow-hidden relative">
-                        @php
-                        $epicStart = max($epic->start_date, \Carbon\Carbon::parse($this->start_date));
-                        $epicEnd = min($epic->end_date, \Carbon\Carbon::parse($this->end_date));
-                        $rangeStart = \Carbon\Carbon::parse($this->start_date);
-                        $rangeEnd = \Carbon\Carbon::parse($this->end_date);
-                        $totalDays = $rangeStart->diffInDays($rangeEnd);
-                        $offsetDays = $rangeStart->diffInDays($epicStart);
-                        $durationDays = $epicStart->diffInDays($epicEnd);
-                        $leftPercent = ($offsetDays / $totalDays) * 100;
-                        $widthPercent = ($durationDays / $totalDays) * 100;
-                        @endphp
-                        <div class="absolute h-full rounded"
-                            style="left: {{ $leftPercent }}%; width: {{ $widthPercent }}%; background-color: {{ $epic->squads->first()->color ?? '#6B7280' }}80">
-                        </div>
-                    </div>
-
-                    @if($epic->stories->isNotEmpty())
-                    <div class="pl-6 space-y-2 border-l-2 border-zinc-200 dark:border-zinc-700">
-                        @foreach($epic->stories as $story)
-                        <div class="flex items-center gap-3">
-                            <div class="h-2 w-2 rounded-full" style="background-color: {{ $story->squad->color }}"></div>
-                            <span class="flex-1 text-sm">{{ $story->title }}</span>
-                            <flux:badge size="sm" :color="$story->status->slug === 'completed' ? 'green' : ($story->status->slug === 'in-progress' ? 'blue' : ($story->status->slug === 'blocked' ? 'red' : 'zinc'))">
-                                {{ $story->status->name }}
-                            </flux:badge>
-                            @if($story->start_date && $story->end_date)
-                            <span class="text-xs text-zinc-500 dark:text-zinc-400">
-                                {{ $story->start_date->format('M j') }} - {{ $story->end_date->format('M j') }}
-                            </span>
-                            @endif
-                            <flux:button href="/stories/{{ $story->id }}/edit" variant="ghost" size="xs" wire:navigate>Edit</flux:button>
-                        </div>
-                        @endforeach
-                    </div>
+            <div class="space-y-1.5">
+                <div class="flex flex-wrap items-center gap-2">
+                    <a href="/epics/{{ $epic->id }}/edit" wire:navigate class="font-medium text-sm hover:underline">
+                        {{ $epic->title }}
+                    </a>
+                    @if($epic->status)
+                    <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium"
+                          style="background-color: {{ $epic->status->color }}1f; color: {{ $epic->status->color }}">
+                        <span class="size-1.5 rounded-full" style="background-color: {{ $epic->status->color }}"></span>
+                        {{ $epic->status->name }}
+                    </span>
                     @endif
+                    <span class="text-xs text-zinc-500 dark:text-zinc-400">
+                        {{ $epic->span['weeks'] }} {{ Str::plural('week', $epic->span['weeks']) }} · {{ $epic->span['points'] }} pts
+                    </span>
                 </div>
-            </flux:card>
+
+                <div class="relative h-7 rounded-md bg-zinc-100 dark:bg-zinc-800">
+                    <div class="absolute h-full rounded-md flex items-center px-2 overflow-hidden"
+                         style="left: {{ $leftPercent }}%; width: {{ $widthPercent }}%; background-color: {{ $color }}80"
+                         title="{{ $epic->span['start']->format('M j') }} – {{ $epic->span['end']->format('M j, Y') }}">
+                        <span class="text-[11px] font-medium text-zinc-900 dark:text-white whitespace-nowrap">
+                            {{ $epic->span['start']->format('M j') }} – {{ $epic->span['end']->format('M j') }}
+                        </span>
+                    </div>
+                </div>
+            </div>
             @endforeach
         </div>
-        @endif
+    </flux:card>
+    @endif
 </div>

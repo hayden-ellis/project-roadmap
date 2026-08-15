@@ -21,12 +21,18 @@ Route::middleware([
 ])->group(function () {
     /* Route::livewire('/dashboard', 'dashboard')->name('dashboard'); */
 
+    Route::livewire('/now', 'now')->name('now');
+
+    Route::livewire('/matrix', 'matrix')->name('matrix');
+
     Route::livewire('/roadmap', 'roadmap.calendar')->name('roadmap');
     Route::livewire('/roadmap/timeline', 'roadmap.timeline')->name('roadmap.timeline');
 
     Route::livewire('/squads', 'squads.index')->name('squads.index');
     Route::livewire('/squads/create', 'squads.create')->name('squads.create');
     Route::livewire('/squads/{squad}/edit', 'squads.edit')->name('squads.edit');
+
+    Route::livewire('/statuses', 'statuses.index')->name('statuses.index');
 
     Route::livewire('/categories', 'categories.index')->name('categories.index');
     Route::livewire('/categories/create', 'categories.create')->name('categories.create');
@@ -36,12 +42,13 @@ Route::middleware([
     Route::livewire('/epics/create', 'epics.create')->name('epics.create');
     Route::livewire('/epics/{epic}/edit', 'epics.edit')->name('epics.edit');
 
-    Route::livewire('/epics/{epic}/stories/create', 'stories.create')->name('stories.create');
-    Route::livewire('/stories/{story}/edit', 'stories.edit')->name('stories.edit');
+    Route::livewire('/engineers', 'engineers.index')->name('engineers.index');
+    Route::livewire('/engineers/create', 'engineers.create')->name('engineers.create');
+    Route::livewire('/engineers/{engineer}/edit', 'engineers.edit')->name('engineers.edit');
 
-    Route::livewire('/planning', 'planning.index')->name('planning.index');
-    Route::livewire('/planning/create', 'planning.show')->name('planning.create');
-    Route::livewire('/planning/{plan}', 'planning.show')->name('planning.show');
+    // Replaces the old planning.index / planning.show pair with a single
+    // engineer x week grid. Capacity lives on people now, not on squads.
+    Route::livewire('/planning', 'planning.grid')->name('planning.grid');
 });
 
 Route::middleware(['auth:sanctum', 'verified'])->group(function () {

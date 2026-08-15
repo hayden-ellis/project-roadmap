@@ -1,17 +1,36 @@
 <?php
 
-use App\Models\Category;
+use App\Models\Allocation;
+use App\Models\Engineer;
 use App\Models\Epic;
-use App\Models\Squad;
+use App\Models\EpicQuarterPlan;
 use App\Models\Status;
+use App\Services\CapacityService;
+use App\Support\Quarter;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Layout;
-use Livewire\Attributes\Locked;
+use Livewire\Attributes\Url;
 use Livewire\Attributes\Validate;
 use Livewire\Component;
 
+/**
+ * One epic, at a glance.
+ *
+ * Everything writes as you type -- there is no save button. Each field is
+ * validated and persisted on its own so a half-typed date never blocks a
+ * priority change.
+ *
+ * The week spine is the centre of the page: it reads allocations for the
+ * selected quarter and writes them back, so staffing can be adjusted here
+ * instead of only from the planning grid.
+ */
 new #[Layout('components.layouts.app.sidebar')] class extends Component
 {
+    /** Fields with a validation rule attached; is_recurring has none. */
+    private const VALIDATED = ['title', 'description', 'status_id', 'category_id', 'priority', 'start_date', 'end_date'];
+
     public Epic $epic;
 
     #[Validate('required|string|max:255')]
@@ -37,41 +56,19 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     #[Validate('nullable|date|after_or_equal:start_date')]
     public string $end_date = '';
 
-    #[Validate('nullable|array')]
+    /** Scopes the spine and the squad plan. Everything else is quarter-agnostic. */
+    #[Url]
+    public string $quarter = '';
+
     public array $squad_ids = [];
 
-    public array $squad_data = [];
+    /** squadId => planned points */
+    public array $planned_points = [];
 
-    // Original values for dirty checking
-    #[Locked]
-    public string $original_title = '';
+    /** squadId => delivered points (manually maintained actuals) */
+    public array $delivered_points = [];
 
-    #[Locked]
-    public string $original_description = '';
-
-    #[Locked]
-    public string $original_status_id = '';
-
-    #[Locked]
-    public string $original_category_id = '';
-
-    #[Locked]
-    public string $original_priority = 'medium';
-
-    #[Locked]
-    public string $original_start_date = '';
-
-    #[Locked]
-    public string $original_end_date = '';
-
-    #[Locked]
-    public bool $original_is_recurring = false;
-
-    #[Locked]
-    public array $original_squad_ids = [];
-
-    #[Locked]
-    public array $original_squad_data = [];
+    public bool $confirmingDeletion = false;
 
     public function mount(Epic $epic): void
     {
@@ -80,418 +77,813 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->epic = $epic;
         $this->title = $epic->title;
         $this->description = $epic->description ?? '';
-        $this->status_id = (string) $epic->status_id;
+        $this->status_id = (string) ($epic->status_id ?? Status::defaultFor($epic->team)?->id ?? '');
         $this->category_id = (string) ($epic->category_id ?? '');
+        // A freshly created instance may not have the column defaults loaded
+        // back yet, so both are coerced rather than assumed.
         $this->priority = $epic->priority ?? 'medium';
-        $this->is_recurring = $epic->is_recurring ?? false;
+        $this->is_recurring = (bool) $epic->is_recurring;
         $this->start_date = $epic->start_date?->format('Y-m-d') ?? '';
         $this->end_date = $epic->end_date?->format('Y-m-d') ?? '';
-        $this->squad_ids = $epic->squads()->pluck('squads.id')->map(fn ($id) => (string) $id)->toArray();
 
-        // Load pivot data for each squad
-        foreach ($epic->squads as $squad) {
-            $this->squad_data[$squad->id] = [
-                'start_date' => $squad->pivot->start_date ? \Carbon\Carbon::parse($squad->pivot->start_date)->format('Y-m-d') : '',
-                'end_date' => $squad->pivot->end_date ? \Carbon\Carbon::parse($squad->pivot->end_date)->format('Y-m-d') : '',
-                'estimated_story_points' => $squad->pivot->estimated_story_points,
-            ];
-        }
+        $this->quarter = $this->quarter ?: $this->openingQuarter()->key();
 
-        // Store original values for dirty checking
-        $this->original_title = $this->title;
-        $this->original_description = $this->description;
-        $this->original_status_id = $this->status_id;
-        $this->original_category_id = $this->category_id;
-        $this->original_priority = $this->priority;
-        $this->original_is_recurring = $this->is_recurring;
-        $this->original_start_date = $this->start_date;
-        $this->original_end_date = $this->end_date;
-        $this->original_squad_ids = $this->squad_ids;
-        $this->original_squad_data = $this->squad_data;
+        $this->loadQuarter();
     }
 
-    public function hasUnsavedChanges(): bool
+    /** Land on the current quarter when the epic runs there, else its first plan. */
+    private function openingQuarter(): Quarter
     {
-        // Check simple fields
-        if ($this->title !== $this->original_title) {
-            return true;
-        }
-        if ($this->description !== $this->original_description) {
-            return true;
-        }
-        if ($this->status_id !== $this->original_status_id) {
-            return true;
-        }
-        if ($this->category_id !== $this->original_category_id) {
-            return true;
-        }
-        if ($this->priority !== $this->original_priority) {
-            return true;
-        }
-        if ($this->is_recurring !== $this->original_is_recurring) {
-            return true;
-        }
-        if ($this->start_date !== $this->original_start_date) {
-            return true;
-        }
-        if ($this->end_date !== $this->original_end_date) {
-            return true;
+        $current = Quarter::current();
+
+        if ($this->epic->quarterPlans()->forQuarter($current)->exists()) {
+            return $current;
         }
 
-        // Check squad_ids array (create copies to avoid mutating originals)
-        if (count($this->squad_ids) !== count($this->original_squad_ids)) {
-            return true;
-        }
-        $currentSquadIds = $this->squad_ids;
-        $originalSquadIds = $this->original_squad_ids;
-        sort($currentSquadIds);
-        sort($originalSquadIds);
-        if ($currentSquadIds !== $originalSquadIds) {
-            return true;
-        }
+        $first = $this->epic->quarterPlans()->orderBy('year')->orderBy('quarter')->first();
 
-        // Check squad_data nested array
-        foreach ($this->squad_ids as $squadId) {
-            $current = $this->squad_data[$squadId] ?? ['start_date' => '', 'end_date' => '', 'estimated_story_points' => null];
-            $original = $this->original_squad_data[$squadId] ?? ['start_date' => '', 'end_date' => '', 'estimated_story_points' => null];
-
-            if ($current['start_date'] !== $original['start_date']) {
-                return true;
-            }
-            if ($current['end_date'] !== $original['end_date']) {
-                return true;
-            }
-            if (($current['estimated_story_points'] ?? null) !== ($original['estimated_story_points'] ?? null)) {
-                return true;
-            }
-        }
-
-        return false;
+        return $first ? $first->toQuarter() : $current;
     }
 
-    public function updatedSquadIds(): void
+    private function loadQuarter(): void
     {
-        // When a squad is added, pre-populate with epic dates if they exist
-        foreach ($this->squad_ids as $squadId) {
-            if (! isset($this->squad_data[$squadId])) {
-                $this->squad_data[$squadId] = [
-                    'start_date' => $this->start_date,
-                    'end_date' => $this->end_date,
-                    'estimated_story_points' => 25,
-                ];
-            }
-        }
+        $plans = $this->epic->quarterPlans()->forQuarter(Quarter::parse($this->quarter))->get();
+
+        $this->squad_ids = $plans->pluck('squad_id')->all();
+        $this->planned_points = $plans->pluck('planned_points', 'squad_id')->all();
+        $this->delivered_points = $plans->pluck('delivered_points', 'squad_id')->all();
     }
 
-    public function copyDatesToAllSquads(): void
+    // ------------------------------------------------------------- autosaving
+
+    public function updated(string $property): void
     {
-        // Copy epic dates to all selected squads
-        foreach ($this->squad_ids as $squadId) {
-            $this->squad_data[$squadId]['start_date'] = $this->start_date;
-            $this->squad_data[$squadId]['end_date'] = $this->end_date;
-        }
-    }
+        if ($property === 'quarter') {
+            $this->loadQuarter();
 
-    public function applyQuarterPreset(int $squadId, string $preset): void
-    {
-        if (! isset($this->squad_data[$squadId])) {
-            $this->squad_data[$squadId] = [
-                'start_date' => '',
-                'end_date' => '',
-                'estimated_story_points' => 25,
-            ];
+            return;
         }
 
-        $now = \Carbon\Carbon::now();
-        $currentQuarter = ceil($now->month / 3);
-        $currentYear = $now->year;
+        if ($property === 'squad_ids') {
+            $this->syncSquads();
 
-        if ($preset === 'this-quarter') {
-            $startMonth = ($currentQuarter - 1) * 3 + 1;
-            $startDate = \Carbon\Carbon::create($currentYear, $startMonth, 1)->startOfMonth();
-            $endDate = $startDate->copy()->addMonths(2)->endOfMonth();
-        } else {
-            // next-quarter
-            if ($currentQuarter === 4) {
-                $startMonth = 1;
-                $year = $currentYear + 1;
-            } else {
-                $startMonth = ($currentQuarter * 3) + 1;
-                $year = $currentYear;
+            return;
+        }
+
+        if (str_contains($property, '.')) {
+            [$base, $squadId] = explode('.', $property, 2);
+
+            if (in_array($base, ['planned_points', 'delivered_points'], true)) {
+                $this->savePoints((int) $squadId);
             }
-            $startDate = \Carbon\Carbon::create($year, $startMonth, 1)->startOfMonth();
-            $endDate = $startDate->copy()->addMonths(2)->endOfMonth();
+
+            return;
         }
 
-        $this->squad_data[$squadId]['start_date'] = $startDate->format('Y-m-d');
-        $this->squad_data[$squadId]['end_date'] = $endDate->format('Y-m-d');
+        $this->saveField($property);
     }
 
-    public function save(): void
+    /**
+     * Persists one column. Validation is scoped to the field that changed so
+     * an incomplete value elsewhere on the page cannot block the write.
+     */
+    private function saveField(string $property): void
+    {
+        $columns = [
+            'title' => fn () => $this->title,
+            'description' => fn () => $this->description,
+            'status_id' => fn () => $this->status_id ?: null,
+            'category_id' => fn () => $this->category_id ?: null,
+            'priority' => fn () => $this->priority,
+            'start_date' => fn () => $this->start_date ?: null,
+            'end_date' => fn () => $this->end_date ?: null,
+            'is_recurring' => fn () => $this->is_recurring,
+        ];
+
+        if (! isset($columns[$property])) {
+            return;
+        }
+
+        $this->authorize('update', $this->epic);
+
+        // The two dates constrain each other, so either edit re-checks both.
+        if (in_array($property, ['start_date', 'end_date'], true)) {
+            $this->validateOnly('start_date');
+            $this->validateOnly('end_date');
+        } elseif (in_array($property, self::VALIDATED, true)) {
+            $this->validateOnly($property);
+        }
+
+        $statusChanged = $property === 'status_id'
+            && (string) $this->epic->status_id !== $this->status_id;
+
+        $this->epic->update([$property => $columns[$property]()]);
+
+        // Whatever the old pause was about, it ended when the epic moved --
+        // the same rule the board applies when a card is dragged.
+        if ($statusChanged) {
+            $this->epic->pauses()->open()->update(['resumed_at' => now()]);
+        }
+
+        $this->saved();
+    }
+
+    private function syncSquads(): void
     {
         $this->authorize('update', $this->epic);
 
-        $this->validate();
+        $quarter = Quarter::parse($this->quarter);
 
-        $this->epic->update([
-            'status_id' => $this->status_id,
-            'category_id' => $this->category_id ?: null,
-            'priority' => $this->priority,
-            'title' => $this->title,
-            'description' => $this->description,
-            'is_recurring' => $this->is_recurring,
-            'start_date' => $this->start_date ?: null,
-            'end_date' => $this->end_date ?: null,
-        ]);
+        $chosen = Auth::user()->currentTeam->squads()
+            ->whereIn('id', array_map('intval', $this->squad_ids))
+            ->pluck('id')
+            ->all();
 
-        // Sync squads with pivot data
-        $syncData = [];
-        foreach ($this->squad_ids as $squadId) {
-            $startDate = $this->squad_data[$squadId]['start_date'] ?? '';
-            $endDate = $this->squad_data[$squadId]['end_date'] ?? '';
-            $estimatedPoints = $this->squad_data[$squadId]['estimated_story_points'] ?? '';
-            $syncData[$squadId] = [
-                'start_date' => $startDate !== '' ? $startDate : null,
-                'end_date' => $endDate !== '' ? $endDate : null,
-                'estimated_story_points' => $estimatedPoints !== '' && $estimatedPoints !== null ? (int) $estimatedPoints : null,
-            ];
-        }
+        DB::transaction(function () use ($quarter, $chosen) {
+            // Only this quarter's plans are touched; other quarters the epic
+            // runs in are left alone.
+            $this->epic->quarterPlans()
+                ->forQuarter($quarter)
+                ->whereNotIn('squad_id', $chosen ?: [0])
+                ->delete();
 
-        $this->epic->squads()->sync($syncData);
+            foreach ($chosen as $squadId) {
+                $this->planned_points[$squadId] ??= 25;
 
-        $this->redirect('/epics', navigate: true);
+                EpicQuarterPlan::firstOrCreate(
+                    [
+                        'epic_id' => $this->epic->id,
+                        'squad_id' => $squadId,
+                        'year' => $quarter->year,
+                        'quarter' => $quarter->quarter,
+                    ],
+                    ['planned_points' => $this->normalise($this->planned_points[$squadId])],
+                );
+            }
+        });
+
+        $this->squad_ids = $chosen;
+        $this->saved();
     }
 
-    public function discardChanges(): void
+    private function savePoints(int $squadId): void
     {
-        // Reset all fields to original values
-        $this->title = $this->original_title;
-        $this->description = $this->original_description;
-        $this->status_id = $this->original_status_id;
-        $this->category_id = $this->original_category_id;
-        $this->priority = $this->original_priority;
-        $this->is_recurring = $this->original_is_recurring;
-        $this->start_date = $this->original_start_date;
-        $this->end_date = $this->original_end_date;
-        $this->squad_ids = $this->original_squad_ids;
-        $this->squad_data = $this->original_squad_data;
+        $this->authorize('update', $this->epic);
+
+        $plan = $this->epic->quarterPlans()
+            ->forQuarter(Quarter::parse($this->quarter))
+            ->where('squad_id', $squadId)
+            ->first();
+
+        if (! $plan) {
+            return;
+        }
+
+        $plan->update([
+            'planned_points' => $this->normalise($this->planned_points[$squadId] ?? null),
+            'delivered_points' => $this->normalise($this->delivered_points[$squadId] ?? null),
+        ]);
+
+        $this->saved();
+    }
+
+    private function normalise(mixed $value): ?int
+    {
+        return ($value === null || $value === '') ? null : max(0, (int) $value);
+    }
+
+    private function saved(): void
+    {
+        $this->dispatch('epic-saved');
+    }
+
+    // -------------------------------------------------------------- staffing
+
+    /**
+     * Books someone across the weeks this epic actually runs, clamped to the
+     * selected quarter. Trim from there in the spine.
+     */
+    public function addEngineer(int $engineerId): void
+    {
+        $this->authorize('update', $this->epic);
+        $this->assertEngineerInTeam($engineerId);
+
+        $weeks = $this->openingWeeks();
+
+        DB::transaction(function () use ($engineerId, $weeks) {
+            foreach ($weeks as $week) {
+                Allocation::firstOrCreate(
+                    ['engineer_id' => $engineerId, 'epic_id' => $this->epic->id, 'week_start' => $week],
+                    ['share' => 1.0],
+                );
+            }
+        });
+
+        $this->saved();
+    }
+
+    public function toggleWeek(int $engineerId, string $week): void
+    {
+        $this->authorize('update', $this->epic);
+        $this->assertEngineerInTeam($engineerId);
+        $this->assertWeekInQuarter($week);
+
+        $existing = Allocation::where('engineer_id', $engineerId)
+            ->where('epic_id', $this->epic->id)
+            ->inWeek($week)
+            ->first();
+
+        $existing
+            ? $existing->delete()
+            : Allocation::create([
+                'engineer_id' => $engineerId,
+                'epic_id' => $this->epic->id,
+                'week_start' => $week,
+                'share' => 1.0,
+            ]);
+
+        $this->saved();
+    }
+
+    /** Dragging across a run of weeks must not fire a request per cell. */
+    public function paintWeeks(int $engineerId, string $fromWeek, string $toWeek, bool $erase = false): void
+    {
+        $this->authorize('update', $this->epic);
+        $this->assertEngineerInTeam($engineerId);
+
+        $weeks = collect($this->quarterWeeks())->map(fn ($w) => $w->toDateString());
+
+        $from = $weeks->search($fromWeek);
+        $to = $weeks->search($toWeek);
+
+        if ($from === false || $to === false) {
+            return;
+        }
+
+        $slice = $weeks->slice(min($from, $to), abs($to - $from) + 1);
+
+        DB::transaction(function () use ($slice, $engineerId, $erase) {
+            if ($erase) {
+                Allocation::where('engineer_id', $engineerId)
+                    ->where('epic_id', $this->epic->id)
+                    ->whereIn('week_start', $slice)
+                    ->delete();
+
+                return;
+            }
+
+            foreach ($slice as $week) {
+                Allocation::firstOrCreate(
+                    ['engineer_id' => $engineerId, 'epic_id' => $this->epic->id, 'week_start' => $week],
+                    ['share' => 1.0],
+                );
+            }
+        });
+
+        $this->saved();
+    }
+
+    /** Clears someone off this epic for the selected quarter only. */
+    public function removeEngineer(int $engineerId): void
+    {
+        $this->authorize('update', $this->epic);
+        $this->assertEngineerInTeam($engineerId);
+
+        $weeks = collect($this->quarterWeeks())->map(fn ($w) => $w->toDateString());
+
+        Allocation::where('engineer_id', $engineerId)
+            ->where('epic_id', $this->epic->id)
+            ->whereIn('week_start', $weeks)
+            ->delete();
+
+        $this->saved();
     }
 
     public function delete(): void
     {
         $this->authorize('delete', $this->epic);
-
         $this->epic->delete();
 
         $this->redirect('/epics', navigate: true);
     }
 
+    /** @return array<int, CarbonImmutable> */
+    private function quarterWeeks(): array
+    {
+        return Auth::user()->currentTeam->weekCalendar()->weeksIn(Quarter::parse($this->quarter));
+    }
+
+    /** @return array<int, string> */
+    private function openingWeeks(): array
+    {
+        $weeks = collect($this->quarterWeeks());
+
+        $start = $this->start_date ? CarbonImmutable::parse($this->start_date) : null;
+        $end = $this->end_date ? CarbonImmutable::parse($this->end_date) : null;
+
+        $overlapping = $weeks->filter(fn (CarbonImmutable $week) => (! $start || $week->addDays(6)->gte($start))
+            && (! $end || $week->lte($end)));
+
+        // No dates, or dates that miss this quarter entirely: book the quarter.
+        return ($overlapping->isEmpty() ? $weeks : $overlapping)
+            ->map(fn (CarbonImmutable $week) => $week->toDateString())
+            ->all();
+    }
+
+    private function assertEngineerInTeam(int $engineerId): void
+    {
+        abort_unless(
+            Auth::user()->currentTeam->engineers()->whereKey($engineerId)->exists(),
+            403,
+        );
+    }
+
+    private function assertWeekInQuarter(string $week): void
+    {
+        abort_unless(
+            collect($this->quarterWeeks())->contains(fn ($w) => $w->toDateString() === $week),
+            422,
+        );
+    }
+
     public function with(): array
     {
+        $team = Auth::user()->currentTeam;
+        $capacity = CapacityService::for($team);
+        $quarter = Quarter::parse($this->quarter);
+        $weeks = $capacity->calendar()->weeksIn($quarter);
+        $currentWeek = $capacity->currentWeek()->toDateString();
+
+        $allocations = Allocation::where('epic_id', $this->epic->id)
+            ->betweenWeeks($weeks[0] ?? $quarter->start(), end($weeks) ?: $quarter->end())
+            ->get()
+            ->groupBy(fn ($a) => $a->engineer_id);
+
+        $booked = Engineer::whereIn('id', $allocations->keys())
+            ->with('squad')
+            ->ordered()
+            ->get();
+
+        $rows = $booked->map(function (Engineer $engineer) use ($allocations, $capacity, $weeks, $currentWeek) {
+            $mine = $allocations[$engineer->id]->keyBy(fn ($a) => $a->week_start->toDateString());
+
+            return [
+                'engineer' => $engineer,
+                'weeks' => $mine->count(),
+                'points' => (int) $mine->sum(fn ($a) => $capacity->weeklyCapacity($engineer->id, $a->week_start)),
+                'cells' => collect($weeks)->map(fn (CarbonImmutable $week) => [
+                    'week' => $week->toDateString(),
+                    'label' => $week->format('M j'),
+                    'booked' => $mine->has($week->toDateString()),
+                    'capacity' => $capacity->weeklyCapacity($engineer->id, $week),
+                    'over' => $capacity->isOverAllocated($engineer->id, $week),
+                    'isCurrent' => $week->toDateString() === $currentWeek,
+                ]),
+            ];
+        });
+
+        // Staffed points broken out by squad -- the segments of the rail meter.
+        $bySquad = $rows->groupBy(fn ($row) => $row['engineer']->squad?->name ?? 'No squad')
+            ->map(fn ($group) => [
+                'color' => $group->first()['engineer']->squad?->color ?? '#71717a',
+                'points' => $group->sum('points'),
+            ])
+            ->sortByDesc('points')
+            ->values();
+
+        $seen = [];
+        $columns = collect($weeks)->map(function (CarbonImmutable $week) use (&$seen, $currentWeek) {
+            $month = $week->format('M');
+            $first = ! isset($seen[$month]);
+            $seen[$month] = true;
+
+            return [
+                'key' => $week->toDateString(),
+                'month' => $first ? mb_strtoupper($month) : '',
+                'isCurrent' => $week->toDateString() === $currentWeek,
+            ];
+        });
+
         return [
-            'statuses' => Status::orderBy('order')->get(),
-            'squads' => Auth::user()->currentTeam->squads()->orderBy('name')->get(),
-            'categories' => Auth::user()->currentTeam->categories()->ordered()->get(),
+            'squads' => $team->squads()->ordered()->get(),
+            'categories' => $team->categories()->ordered()->get(),
+            'statuses' => $team->statuses()->ordered()->get(),
+            'quarters' => Quarter::current()->previous()->through(9),
+            'quarterLabel' => $quarter->label(),
+            'rows' => $rows,
+            'columns' => $columns,
+            'bySquad' => $bySquad,
+            'available' => $team->engineers()->with('squad')->active()->ordered()->get()
+                ->reject(fn (Engineer $e) => $allocations->has($e->id))
+                ->values(),
+            'staffedPoints' => (int) $rows->sum('points'),
+            'plannedPoints' => (int) collect($this->planned_points)
+                ->only($this->squad_ids)
+                ->sum(),
+            'openPause' => $this->epic->openPause(),
         ];
     }
 };
 ?>
 
-<div class="max-w-7xl">
-    <form wire:submit="save">
-        <div class="pb-4">
-            <flux:button href="/epics" variant="ghost" icon="arrow-left" wire:navigate class="mb-3">Back to Epics</flux:button>
+@php
+    // One structural device runs through the page: a small, wide-tracked label
+    // above every block of data. Colour only ever comes from squad or category.
+    $micro = 'text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-400 dark:text-zinc-500';
+    $panel = 'rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900';
+    $cols = 'grid-template-columns: repeat('.max($columns->count(), 1).', minmax(0, 1fr));';
+@endphp
+
+<div class="max-w-6xl"
+     x-data="{ saved: false, timer: null }"
+     x-on:epic-saved.window="saved = true; clearTimeout(timer); timer = setTimeout(() => saved = false, 1600)">
+
+    {{-- Page bar: where you came from, whether it stuck, what quarter you're in --}}
+    <div class="flex items-center justify-between gap-4 pb-5">
+        <flux:button href="/epics" variant="subtle" size="sm" icon="arrow-left" wire:navigate>Epics</flux:button>
+
+        <div class="flex items-center gap-3">
+            <span class="text-[11px] font-medium text-zinc-400 tabular-nums" wire:loading>Saving…</span>
+            <span x-cloak x-show="saved" x-transition.opacity.duration.150ms wire:loading.remove
+                  class="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                <flux:icon.check variant="micro" class="size-3.5" />Saved
+            </span>
+
+            <flux:select wire:model.live="quarter" size="sm" class="w-32">
+                @foreach($quarters as $option)
+                <flux:select.option value="{{ $option->key() }}">{{ $option->label() }}</flux:select.option>
+                @endforeach
+            </flux:select>
         </div>
+    </div>
 
-        <h1 class="mb-6">Edit Epic</h1>
+    <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_20rem] gap-6 lg:gap-8 items-start">
 
-        <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
-            <!-- Main Form (2/3 width on large screens) -->
-            <div class="xl:col-span-2">
-                <flux:card class="space-y-6">
-                    <flux:field>
-                        <flux:label>Title</flux:label>
-                        <flux:input wire:model.live.debounce.500ms="title" placeholder="e.g., Payment Gateway Integration" />
-                        <flux:error name="title" />
-                    </flux:field>
+        {{-- ─────────────────────────────────────────────── main: title, people, plan --}}
+        <div class="min-w-0 space-y-6">
 
-                    <flux:field>
-                        <flux:label>Description</flux:label>
-                        <flux:textarea wire:model.live.debounce.500ms="description" placeholder="Describe this epic..." rows="4" />
-                        <flux:error name="description" />
-                    </flux:field>
+            <div>
+                @if($epic->status)
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold"
+                      style="background-color: {{ $epic->status->color }}1f; color: {{ $epic->status->color }}">
+                    <span class="size-1.5 rounded-full" style="background-color: {{ $epic->status->color }}"></span>
+                    {{ $epic->status->name }}
+                </span>
+                @endif
 
-                    <div class="grid grid-cols-2 gap-4">
-                        <flux:field>
-                            <flux:label>Status</flux:label>
-                            <flux:select wire:model.live="status_id">
-                                @foreach($statuses as $status)
-                                    <option value="{{ $status->id }}">{{ $status->name }}</option>
-                                @endforeach
-                            </flux:select>
-                            <flux:error name="status_id" />
-                        </flux:field>
+                <input type="text" wire:model.live.debounce.600ms="title" placeholder="Untitled epic"
+                       aria-label="Epic title"
+                       class="mt-3 w-full bg-transparent border-0 border-b border-transparent px-0 py-1
+                              text-2xl sm:text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100
+                              placeholder:text-zinc-300 dark:placeholder:text-zinc-600
+                              hover:border-zinc-200 dark:hover:border-zinc-700
+                              focus:border-accent focus:ring-0 focus:outline-none transition-colors" />
+                <flux:error name="title" />
 
-                        <flux:field>
-                            <flux:label>Priority</flux:label>
-                            <flux:select wire:model.live="priority">
-                                <option value="low">Low</option>
-                                <option value="medium">Medium</option>
-                                <option value="high">High</option>
-                                <option value="critical">Critical</option>
-                            </flux:select>
-                            <flux:error name="priority" />
-                        </flux:field>
-                    </div>
-
-                    <flux:field>
-                        <flux:label>Category</flux:label>
-                        <flux:select wire:model.live="category_id">
-                            <option value="">Select a category</option>
-                            @foreach($categories as $category)
-                                <option value="{{ $category->id }}">{{ $category->name }}</option>
-                            @endforeach
-                        </flux:select>
-                        <flux:description>Categorize this epic by type of work</flux:description>
-                        <flux:error name="category_id" />
-                    </flux:field>
-
-                    <div class="grid grid-cols-2 gap-4">
-                        <flux:field>
-                            <flux:label>Start Date</flux:label>
-                            <flux:input type="date" wire:model.live="start_date" />
-                            <flux:error name="start_date" />
-                        </flux:field>
-
-                        <flux:field>
-                            <flux:label>End Date</flux:label>
-                            <flux:input type="date" wire:model.live="end_date" />
-                            <flux:error name="end_date" />
-                        </flux:field>
-                    </div>
-
-                    <flux:field>
-                        <flux:switch wire:model.live="is_recurring" label="Recurring" description="Auto-add to future quarter plans when capacity is set up" />
-                    </flux:field>
-
-                    @if(!$this->hasUnsavedChanges())
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center gap-3">
-                                <flux:button type="submit" variant="primary">Save Changes</flux:button>
-                                <flux:button href="/epics" variant="ghost" wire:navigate>Cancel</flux:button>
-                            </div>
-                            <flux:button wire:click="delete" wire:confirm="Are you sure you want to delete this epic?" variant="danger">Delete</flux:button>
-                        </div>
-                    @endif
-                </flux:card>
+                <textarea wire:model.live.debounce.600ms="description" rows="1" placeholder="Add a description"
+                          aria-label="Description"
+                          x-data x-init="$el.style.height = $el.scrollHeight + 'px'"
+                          x-on:input="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'"
+                          class="mt-2 w-full resize-none overflow-hidden bg-transparent border-0 px-0 py-1
+                                 text-[15px] leading-relaxed text-zinc-600 dark:text-zinc-400
+                                 placeholder:text-zinc-300 dark:placeholder:text-zinc-600
+                                 focus:ring-0 focus:outline-none"></textarea>
             </div>
 
-            <!-- Squads Sidebar (1/3 width on large screens) -->
-            <div class="xl:col-span-1">
-                <flux:card>
-                    <div class="flex items-center justify-between mb-4">
-                        <flux:heading size="lg">Squads</flux:heading>
-                        @if(!empty($squad_ids) && ($start_date || $end_date))
-                            <flux:button 
-                                wire:click="copyDatesToAllSquads" 
-                                variant="ghost" 
-                                size="xs"
-                                icon="arrow-down">
-                                Copy Dates
-                            </flux:button>
+            @if($openPause)
+            <flux:callout icon="pause-circle" color="amber">
+                <flux:callout.heading>Paused since {{ $openPause->paused_at->format('M j, Y') }}</flux:callout.heading>
+                <flux:callout.text>
+                    {{ $openPause->reason ?? 'No reason recorded.' }}
+                    @if($openPause->supersededBy)
+                        Capacity went to <strong>{{ $openPause->supersededBy->title }}</strong>.
+                    @endif
+                </flux:callout.text>
+            </flux:callout>
+            @endif
+
+            {{-- The spine. Who is on this epic, and which weeks they hold. --}}
+            <div class="{{ $panel }} p-5">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
+                    <div>
+                        <div class="{{ $micro }}">Who's on it</div>
+                        <div class="mt-1 text-[13px] text-zinc-500 dark:text-zinc-400 tabular-nums">
+                            {{ $quarterLabel }} · {{ $columns->count() }} weeks · click or drag a week to book it
+                        </div>
+                    </div>
+
+                    @if($available->isNotEmpty())
+                    <flux:dropdown position="bottom" align="end">
+                        <flux:button size="sm" icon="plus" variant="filled">Add person</flux:button>
+
+                        <flux:menu class="max-h-80 overflow-y-auto">
+                            @foreach($available->groupBy(fn ($e) => $e->squad?->name ?? 'No squad') as $squadName => $people)
+                            <flux:menu.group heading="{{ $squadName }}">
+                                @foreach($people as $person)
+                                <flux:menu.item wire:click="addEngineer({{ $person->id }})">
+                                    {{ $person->name }}
+                                </flux:menu.item>
+                                @endforeach
+                            </flux:menu.group>
+                            @endforeach
+                        </flux:menu>
+                    </flux:dropdown>
+                    @endif
+                </div>
+
+                {{-- contain:paint as well as overflow: without it the spine's
+                     min-width still widens the document on narrow screens. --}}
+                <div class="overflow-x-auto [contain:paint] -mx-1 px-1">
+                    <div class="min-w-[34rem]"
+                        x-data="{
+                            dragging: false, engineer: null, from: null, to: null, erase: false,
+                            start(engineerId, week, booked) {
+                                this.dragging = true; this.engineer = engineerId;
+                                this.from = week; this.to = week; this.erase = booked;
+                            },
+                            extend(engineerId, week) {
+                                if (! this.dragging || engineerId !== this.engineer) return;
+                                this.to = week;
+                            },
+                            finish() {
+                                if (! this.dragging) return;
+                                this.from === this.to
+                                    ? $wire.toggleWeek(this.engineer, this.from)
+                                    : $wire.paintWeeks(this.engineer, this.from, this.to, this.erase);
+                                this.dragging = false; this.engineer = null;
+                            },
+                            inDrag(engineerId, week) {
+                                if (! this.dragging || engineerId !== this.engineer) return false;
+                                return (week >= this.from && week <= this.to) || (week >= this.to && week <= this.from);
+                            }
+                        }"
+                        x-on:mouseup.window="finish()">
+
+                        {{-- Month ruler. NOW replaces the label in the live week. --}}
+                        <div class="flex items-end gap-3 pb-2">
+                            <div class="w-36 shrink-0"></div>
+                            <div class="flex-1 min-w-0 grid gap-[3px]" style="{{ $cols }}">
+                                @foreach($columns as $column)
+                                <div class="text-[9px] font-semibold tracking-[0.1em] leading-none text-center whitespace-nowrap
+                                            {{ $column['isCurrent'] ? 'text-accent-content' : 'text-zinc-300 dark:text-zinc-600' }}">
+                                    {{ $column['isCurrent'] ? 'NOW' : $column['month'] }}
+                                </div>
+                                @endforeach
+                            </div>
+                            <div class="w-16 shrink-0"></div>
+                            <div class="w-5 shrink-0"></div>
+                        </div>
+
+                        @forelse($rows as $row)
+                        @php $color = $row['engineer']->squad->color ?? '#71717a'; @endphp
+                        <div class="group flex items-center gap-3 py-1" wire:key="staff-{{ $row['engineer']->id }}">
+                            <div class="w-36 shrink-0 flex items-center gap-2 min-w-0">
+                                <x-engineer-avatar :engineer="$row['engineer']" size="xs" :tooltip="false" />
+                                <span class="min-w-0">
+                                    <a href="/engineers/{{ $row['engineer']->id }}/edit" wire:navigate
+                                       class="block text-[13px] font-medium truncate text-zinc-800 dark:text-zinc-200 hover:underline">
+                                        {{ $row['engineer']->name }}
+                                    </a>
+                                    <span class="block text-[10px] truncate text-zinc-400 dark:text-zinc-500">
+                                        {{ $row['engineer']->squad->name ?? 'No squad' }}
+                                    </span>
+                                </span>
+                            </div>
+
+                            <div class="flex-1 min-w-0 grid gap-[3px]" style="{{ $cols }}">
+                                @foreach($row['cells'] as $cell)
+                                <button type="button"
+                                        x-on:mousedown.prevent="start({{ $row['engineer']->id }}, '{{ $cell['week'] }}', {{ $cell['booked'] ? 'true' : 'false' }})"
+                                        x-on:mouseenter="extend({{ $row['engineer']->id }}, '{{ $cell['week'] }}')"
+                                        :class="inDrag({{ $row['engineer']->id }}, '{{ $cell['week'] }}') && 'ring-2 ring-zinc-900 dark:ring-white'"
+                                        @class([
+                                            'h-8 rounded-[3px] select-none transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                                            'bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700' => ! $cell['booked'] && ! $cell['over'],
+                                            'bg-red-100 hover:bg-red-200 dark:bg-red-950/60 dark:hover:bg-red-900/50' => ! $cell['booked'] && $cell['over'],
+                                            'opacity-40' => ! $cell['booked'] && $cell['capacity'] === 0,
+                                            'ring-2 ring-inset ring-accent' => $cell['isCurrent'],
+                                        ])
+                                        {{-- Contested weeks are hatched rather than tinted: a squad
+                                             colour can itself be red, so a red marker would vanish. --}}
+                                        style="{{ $cell['booked'] ? 'background-color: '.$color.';' : '' }}{{ $cell['booked'] && $cell['over'] ? 'background-image: repeating-linear-gradient(45deg, transparent 0 4px, rgba(0,0,0,.34) 4px 8px);' : '' }}"
+                                        title="{{ $cell['label'] }} — {{ $cell['booked'] ? 'booked' : 'free' }}, {{ $cell['capacity'] }} pts capacity{{ $cell['over'] ? ($cell['booked'] ? ' — another epic wants this week too' : ' — already booked solid elsewhere') : '' }}">
+                                    <span class="sr-only">{{ $cell['booked'] ? 'Unbook' : 'Book' }} {{ $row['engineer']->name }} for week of {{ $cell['label'] }}</span>
+                                </button>
+                                @endforeach
+                            </div>
+
+                            <div class="w-16 shrink-0 text-right text-[11px] tabular-nums text-zinc-500 dark:text-zinc-400">
+                                {{ $row['weeks'] }}w · {{ $row['points'] }}p
+                            </div>
+
+                            <button type="button" wire:click="removeEngineer({{ $row['engineer']->id }})"
+                                    class="w-5 shrink-0 text-zinc-300 dark:text-zinc-600 opacity-0 group-hover:opacity-100 focus:opacity-100
+                                           hover:text-red-500 dark:hover:text-red-400 transition"
+                                    title="Take {{ $row['engineer']->name }} off this epic in {{ $quarterLabel }}">
+                                <flux:icon.x-mark variant="micro" class="size-4" />
+                                <span class="sr-only">Remove {{ $row['engineer']->name }}</span>
+                            </button>
+                        </div>
+                        @empty
+                        <div class="py-6 text-center">
+                            <flux:text class="text-sm">Nobody is booked in {{ $quarterLabel }}.</flux:text>
+                            <flux:text class="text-xs mt-1">
+                                Add someone above, or spread the whole team at once in the
+                                <flux:link href="/planning?quarter={{ $quarter }}" wire:navigate>planning grid</flux:link>.
+                            </flux:text>
+                        </div>
+                        @endforelse
+
+                        @if($rows->count() > 1)
+                        <div class="flex items-center gap-3 pt-3 mt-2 border-t border-zinc-100 dark:border-zinc-800">
+                            <div class="w-36 shrink-0 {{ $micro }}">Total</div>
+                            <div class="flex-1 min-w-0"></div>
+                            <div class="w-16 shrink-0 text-right text-[11px] font-semibold tabular-nums text-zinc-700 dark:text-zinc-300">
+                                {{ $staffedPoints }}p
+                            </div>
+                            <div class="w-5 shrink-0"></div>
+                        </div>
                         @endif
                     </div>
-                    
-                    @if($squads->isEmpty())
-                        <flux:callout icon="information-circle" class="text-sm">
-                            <flux:callout.text>
-                                No squads created yet. You can <a href="/squads/create" wire:navigate class="underline font-medium">create a squad</a>.
-                            </flux:callout.text>
-                        </flux:callout>
-                    @else
-                        <div class="space-y-4">
-                            @foreach($squads as $squad)
-                                <div class="border border-zinc-200 dark:border-zinc-700 rounded-lg p-4">
-                                    <label class="flex items-center gap-3 cursor-pointer mb-3">
-                                        <input type="checkbox" wire:model.live="squad_ids" value="{{ $squad->id }}" class="rounded border-zinc-300 dark:border-zinc-700" />
-                                        <div class="h-4 w-4 rounded" style="background-color: {{ $squad->color }}"></div>
-                                        <span class="flex-1 font-medium">{{ $squad->name }}</span>
-                                    </label>
-                                    
-                                    @if(in_array((string)$squad->id, $squad_ids))
-                                        <div class="ml-7 space-y-3 pt-3 border-t border-zinc-200 dark:border-zinc-700">
-                                            <!-- Quarter Presets -->
-                                            <div class="flex flex-wrap items-center gap-2 mb-2">
-                                                <flux:text class="text-xs text-zinc-600 dark:text-zinc-400 mr-1">Quick presets:</flux:text>
-                                                <flux:button 
-                                                    wire:click="applyQuarterPreset({{ $squad->id }}, 'this-quarter')" 
-                                                    variant="ghost" 
-                                                    size="xs"
-                                                    class="h-6 text-xs">
-                                                    This Q
-                                                </flux:button>
-                                                <flux:button 
-                                                    wire:click="applyQuarterPreset({{ $squad->id }}, 'next-quarter')" 
-                                                    variant="ghost" 
-                                                    size="xs"
-                                                    class="h-6 text-xs">
-                                                    Next Q
-                                                </flux:button>
-                                            </div>
-                                            <div class="space-y-2">
-                                                <div>
-                                                    <flux:label class="text-xs">Start Date</flux:label>
-                                                    <flux:input type="date" wire:model.live="squad_data.{{ $squad->id }}.start_date" class="text-sm" />
-                                                </div>
-                                                <div>
-                                                    <flux:label class="text-xs">End Date</flux:label>
-                                                    <flux:input type="date" wire:model.live="squad_data.{{ $squad->id }}.end_date" class="text-sm" />
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <flux:label class="text-xs">Total Estimate (Story Points)</flux:label>
-                                                <flux:description class="text-xs !mt-0 mb-1">{{ $squad->name }}'s full effort for this epic</flux:description>
-                                                <div class="flex items-center gap-3">
-                                                    <flux:slider
-                                                        wire:model.live="squad_data.{{ $squad->id }}.estimated_story_points"
-                                                        min="0"
-                                                        max="250"
-                                                        step="5"
-                                                    />
-                                                    <flux:input
-                                                        wire:model.live="squad_data.{{ $squad->id }}.estimated_story_points"
-                                                        type="number"
-                                                        size="sm"
-                                                        class="max-w-20"
-                                                    />
-                                                </div>
-                                            </div>
-                                        </div>
-                                    @endif
-                                </div>
-                            @endforeach
+                </div>
+
+                @php
+                    $contested = $rows->contains(fn ($row) => $row['cells']->contains(fn ($cell) => $cell['booked'] && $cell['over']));
+                    $solid = $rows->contains(fn ($row) => $row['cells']->contains(fn ($cell) => ! $cell['booked'] && $cell['over']));
+                @endphp
+                @if($contested || $solid)
+                <flux:text class="text-xs mt-4">
+                    {{ $contested ? 'Hatched weeks are ones another epic wants from the same person.' : '' }}
+                    {{ $solid ? 'Red weeks are ones where that person is already booked solid elsewhere.' : '' }}
+                </flux:text>
+                @endif
+            </div>
+
+            {{-- Squad plan: the estimate, against the actual --}}
+            <div class="{{ $panel }} p-5">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                    <div>
+                        <div class="{{ $micro }}">Squad plan</div>
+                        <div class="mt-1 text-[13px] text-zinc-500 dark:text-zinc-400">
+                            What each squad committed to in {{ $quarterLabel }}
                         </div>
-                    @endif
-                    <flux:error name="squad_ids" />
-                </flux:card>
+                    </div>
+
+                    {{-- Flux puts the width class on the field itself, so the
+                         wrapper needs its own width to stop it stretching. --}}
+                    <div class="w-full sm:w-44 shrink-0">
+                        <flux:select multiple variant="listbox" size="sm" wire:model.live="squad_ids"
+                                     placeholder="Add squads" class="w-full">
+                            @foreach($squads as $squad)
+                            <flux:select.option value="{{ $squad->id }}">{{ $squad->name }}</flux:select.option>
+                            @endforeach
+                        </flux:select>
+                    </div>
+                </div>
+
+                @if(empty($squad_ids))
+                <flux:text class="text-sm">No squad has taken this on for {{ $quarterLabel }} yet.</flux:text>
+                @else
+                <div class="space-y-2">
+                    <div class="flex items-center gap-3">
+                        <div class="flex-1 min-w-0"></div>
+                        <div class="w-24 shrink-0 text-center {{ $micro }}">Planned</div>
+                        <div class="w-24 shrink-0 text-center {{ $micro }}">Delivered</div>
+                    </div>
+
+                    @foreach($squads->whereIn('id', $squad_ids) as $squad)
+                    <div class="flex items-center gap-3" wire:key="plan-{{ $squad->id }}">
+                        <div class="flex-1 min-w-0 flex items-center gap-2">
+                            <span class="size-2.5 rounded-full shrink-0" style="background-color: {{ $squad->color }}"></span>
+                            <span class="text-[13px] font-medium truncate text-zinc-800 dark:text-zinc-200">{{ $squad->name }}</span>
+                        </div>
+                        <div class="w-24 shrink-0">
+                            <flux:input type="number" min="0" size="sm" class="w-full text-center"
+                                        wire:model.live.debounce.700ms="planned_points.{{ $squad->id }}" placeholder="—" />
+                        </div>
+                        <div class="w-24 shrink-0">
+                            <flux:input type="number" min="0" size="sm" class="w-full text-center"
+                                        wire:model.live.debounce.700ms="delivered_points.{{ $squad->id }}" placeholder="—" />
+                        </div>
+                    </div>
+                    @endforeach
+
+                    <flux:text class="text-xs pt-1">Delivered is kept by hand — update it at review.</flux:text>
+                </div>
+                @endif
             </div>
         </div>
 
-        @if($this->hasUnsavedChanges())
-            <div class="sticky sm:bottom-3 bottom-0 bg-white/70 backdrop-blur-sm border border-gray-200 mt-4 py-3 px-6 rounded-xl shadow-xs dark:border-zinc-800 dark:bg-zinc-900/70">
-                <flux:callout variant="warning" icon="exclamation-triangle">
-                    <div class="flex items-center justify-between gap-4">
-                        <div>
-                            <flux:callout.heading>You have unsaved changes</flux:callout.heading>
-                            <flux:callout.text>Don't forget to save your changes before leaving this page.</flux:callout.text>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <flux:button wire:click="discardChanges" variant="ghost" size="sm">Discard</flux:button>
-                            <flux:button wire:click="save" variant="primary" size="sm">Save Changes</flux:button>
-                        </div>
-                    </div>
-                </flux:callout>
+        {{-- ──────────────────────────────────────────────────── rail: the epic's facts --}}
+        <aside class="lg:sticky lg:top-6 space-y-5">
+
+            <div class="{{ $panel }} p-5">
+                <div class="{{ $micro }}">{{ $quarterLabel }} staffing</div>
+
+                <div class="mt-3 flex items-baseline gap-1.5">
+                    <span class="text-4xl font-bold tracking-tight tabular-nums text-zinc-900 dark:text-zinc-100">{{ $staffedPoints }}</span>
+                    <span class="text-sm text-zinc-400">pts booked</span>
+                </div>
+
+                @php $track = max($staffedPoints, $plannedPoints, 1); @endphp
+                <div class="mt-3 flex h-1.5 w-full gap-[2px] rounded-full overflow-hidden bg-zinc-100 dark:bg-zinc-800">
+                    @foreach($bySquad as $segment)
+                    <div class="h-full first:rounded-l-full last:rounded-r-full"
+                         style="width: {{ round($segment['points'] / $track * 100, 2) }}%; background-color: {{ $segment['color'] }}"></div>
+                    @endforeach
+                </div>
+
+                <div class="mt-2.5 text-[11px] tabular-nums text-zinc-500 dark:text-zinc-400">
+                    @if($plannedPoints > 0)
+                        against {{ $plannedPoints }} pts planned
+                        @if($staffedPoints > $plannedPoints)
+                            <span class="text-amber-600 dark:text-amber-400">· {{ $staffedPoints - $plannedPoints }} over</span>
+                        @elseif($staffedPoints < $plannedPoints)
+                            <span>· {{ $plannedPoints - $staffedPoints }} short</span>
+                        @endif
+                    @else
+                        No estimate set
+                    @endif
+                </div>
             </div>
-        @endif
-    </form>
+
+            <div class="{{ $panel }} divide-y divide-zinc-100 dark:divide-zinc-800">
+                <div class="px-5 py-3.5">
+                    <div class="{{ $micro }}">Details</div>
+                </div>
+
+                <div class="px-5 py-3 flex items-center gap-3">
+                    <label for="epic-status" class="w-20 shrink-0 text-[13px] text-zinc-500 dark:text-zinc-400">Status</label>
+                    <flux:select id="epic-status" wire:model.live="status_id" size="sm" class="flex-1">
+                        @foreach($statuses as $option)
+                        <flux:select.option value="{{ $option->id }}">{{ $option->name }}</flux:select.option>
+                        @endforeach
+                    </flux:select>
+                </div>
+
+                <div class="px-5 py-3 flex items-center gap-3">
+                    <label for="epic-priority" class="w-20 shrink-0 text-[13px] text-zinc-500 dark:text-zinc-400">Priority</label>
+                    <flux:select id="epic-priority" wire:model.live="priority" size="sm" class="flex-1">
+                        <flux:select.option value="low">Low</flux:select.option>
+                        <flux:select.option value="medium">Medium</flux:select.option>
+                        <flux:select.option value="high">High</flux:select.option>
+                        <flux:select.option value="critical">Critical</flux:select.option>
+                    </flux:select>
+                </div>
+
+                <div class="px-5 py-3 flex items-center gap-3">
+                    <label for="epic-category" class="w-20 shrink-0 text-[13px] text-zinc-500 dark:text-zinc-400">Category</label>
+                    <flux:select id="epic-category" wire:model.live="category_id" size="sm" class="flex-1" placeholder="None">
+                        @foreach($categories as $category)
+                        <flux:select.option value="{{ $category->id }}">{{ $category->name }}</flux:select.option>
+                        @endforeach
+                    </flux:select>
+                </div>
+
+                <div class="px-5 py-3 flex items-center gap-3">
+                    <label for="epic-start" class="w-20 shrink-0 text-[13px] text-zinc-500 dark:text-zinc-400">Starts</label>
+                    <flux:input id="epic-start" type="date" size="sm" class="flex-1" wire:model.live="start_date" />
+                </div>
+
+                <div class="px-5 py-3 flex items-center gap-3">
+                    <label for="epic-end" class="w-20 shrink-0 text-[13px] text-zinc-500 dark:text-zinc-400">Ends</label>
+                    <flux:input id="epic-end" type="date" size="sm" class="flex-1" wire:model.live="end_date" />
+                </div>
+
+                @error('end_date')
+                <div class="px-5 py-2.5"><flux:error name="end_date" /></div>
+                @enderror
+
+                <div class="px-5 py-3.5 flex items-center justify-between gap-3">
+                    <span class="min-w-0">
+                        <span class="block text-[13px] text-zinc-500 dark:text-zinc-400">Recurring</span>
+                        <span class="block text-[11px] text-zinc-400 dark:text-zinc-500">Re-plans into each new quarter</span>
+                    </span>
+                    <flux:switch wire:model.live="is_recurring" />
+                </div>
+            </div>
+
+            <div class="px-1">
+                <flux:button type="button" size="sm" variant="subtle" icon="trash"
+                             class="text-red-600 dark:text-red-400"
+                             wire:click="$set('confirmingDeletion', true)">
+                    Delete epic
+                </flux:button>
+            </div>
+        </aside>
+    </div>
+
+    <flux:modal wire:model="confirmingDeletion" class="max-w-md">
+        <div class="space-y-4">
+            <flux:heading size="lg">Delete this epic?</flux:heading>
+            <flux:text>
+                This removes the epic along with its quarter plans and every allocation against it.
+                This cannot be undone.
+            </flux:text>
+            <div class="flex justify-end gap-3">
+                <flux:button variant="ghost" wire:click="$set('confirmingDeletion', false)">Cancel</flux:button>
+                <flux:button variant="danger" wire:click="delete">Delete Epic</flux:button>
+            </div>
+        </div>
+    </flux:modal>
 </div>

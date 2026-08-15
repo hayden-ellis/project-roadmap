@@ -36,7 +36,9 @@ trait Sortable
             $current = $this->sort_order;
             $after = $position;
 
-            if ($current === $after) return;
+            if ($current === $after) {
+                return;
+            }
 
             $this->update(['sort_order' => -1]);
 

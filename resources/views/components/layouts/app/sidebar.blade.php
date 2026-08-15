@@ -18,11 +18,18 @@
 
 
         <flux:sidebar.nav>
-            <flux:sidebar.item icon="map-pin" href="/roadmap" wire:navigate>Roadmap</flux:sidebar.item>
-            <flux:sidebar.item icon="rectangle-stack" href="/epics" wire:navigate>Epics</flux:sidebar.item>
-            <flux:sidebar.item icon="users" href="/squads" wire:navigate>Squads</flux:sidebar.item>
-            <flux:sidebar.item icon="tag" href="/categories" wire:navigate>Categories</flux:sidebar.item>
-            <flux:sidebar.item icon="clipboard-document-list" href="/planning" wire:navigate>Planning</flux:sidebar.item>
+            <flux:sidebar.item icon="bolt" href="/now" wire:navigate>Now</flux:sidebar.item>
+            {{-- <flux:sidebar.item icon="calendar-days" href="/planning" wire:navigate>Planning</flux:sidebar.item> --}}
+            <flux:sidebar.item icon="squares-2x2" href="/matrix" wire:navigate>Matrix</flux:sidebar.item>
+            {{-- <flux:sidebar.item icon="map-pin" href="/roadmap" wire:navigate>Roadmap</flux:sidebar.item> --}}
+
+            <flux:sidebar.group expandable heading="Manage" class="mt-2">
+                <flux:sidebar.item icon="rectangle-stack" href="/epics" wire:navigate>Epics</flux:sidebar.item>
+                <flux:sidebar.item icon="user-group" href="/engineers" wire:navigate>Engineers</flux:sidebar.item>
+                <flux:sidebar.item icon="users" href="/squads" wire:navigate>Squads</flux:sidebar.item>
+                <flux:sidebar.item icon="view-columns" href="/statuses" wire:navigate>Statuses</flux:sidebar.item>
+                <flux:sidebar.item icon="tag" href="/categories" wire:navigate>Categories</flux:sidebar.item>
+            </flux:sidebar.group>
         </flux:sidebar.nav>
 
         <flux:sidebar.spacer />

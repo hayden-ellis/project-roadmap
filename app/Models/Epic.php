@@ -2,8 +2,10 @@
 
 namespace App\Models;
 
+use App\Support\Quarter;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Epic extends Model
@@ -13,11 +15,15 @@ class Epic extends Model
 
     protected $fillable = [
         'team_id',
-        'status_id',
         'category_id',
-        'priority',
+        'status_id',
+        'board_order',
         'title',
         'description',
+        'priority',
+        'importance',
+        'urgency',
+        'matrix_order',
         'start_date',
         'end_date',
         'is_recurring',
@@ -26,33 +32,64 @@ class Epic extends Model
     protected function casts(): array
     {
         return [
-            'start_date' => 'date',
-            'end_date' => 'date',
+            'start_date' => 'immutable_date',
+            'end_date' => 'immutable_date',
             'is_recurring' => 'boolean',
+            'board_order' => 'integer',
+            'matrix_order' => 'integer',
         ];
     }
 
-    public function team(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    protected static function booted(): void
+    {
+        // A new epic lands in the quadrant its priority implies and joins the
+        // end of it, until someone drags it somewhere more honest.
+        static::creating(function (Epic $epic) {
+            $priority = $epic->priority ?? 'medium';
+
+            $epic->importance ??= in_array($priority, ['critical', 'high'], true) ? 'high' : 'low';
+            $epic->urgency ??= $priority === 'critical' ? 'urgent' : 'not_urgent';
+
+            if (! $epic->matrix_order) {
+                $epic->matrix_order = ((int) static::where('team_id', $epic->team_id)
+                    ->where('importance', $epic->importance)
+                    ->where('urgency', $epic->urgency)
+                    ->max('matrix_order')) + 1;
+            }
+        });
+    }
+
+    /** Board order within a column. */
+    public function scopeOnBoard($query)
+    {
+        return $query->orderBy('board_order')->orderBy('id');
+    }
+
+    /** Matrix order within a quadrant. */
+    public function scopeInMatrix($query)
+    {
+        return $query->orderBy('matrix_order')->orderBy('id');
+    }
+
+    /** The quadrant key the matrix page groups and drags by. */
+    public function quadrant(): string
+    {
+        return "{$this->importance}/{$this->urgency}";
+    }
+
+    public function team(): BelongsTo
     {
         return $this->belongsTo(Team::class);
     }
 
-    public function status(): \Illuminate\Database\Eloquent\Relations\BelongsTo
-    {
-        return $this->belongsTo(Status::class);
-    }
-
-    public function category(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);
     }
 
-    public function squads(): \Illuminate\Database\Eloquent\Relations\BelongsToMany
+    public function status(): BelongsTo
     {
-        return $this->belongsToMany(Squad::class, 'epic_squad')
-            ->using(EpicSquad::class)
-            ->withPivot('start_date', 'end_date', 'estimated_story_points')
-            ->withTimestamps();
+        return $this->belongsTo(Status::class);
     }
 
     public function quarterPlans(): HasMany
@@ -60,20 +97,67 @@ class Epic extends Model
         return $this->hasMany(EpicQuarterPlan::class);
     }
 
-    public function overlapsQuarter(string $quarter): bool
+    public function allocations(): HasMany
     {
-        if (! $this->start_date || ! $this->end_date) {
-            return false;
-        }
-
-        $quarterDates = \App\Models\QuarterPlan::getQuarterDates($quarter);
-
-        return $this->start_date <= $quarterDates['end']
-            && $this->end_date >= $quarterDates['start'];
+        return $this->hasMany(Allocation::class);
     }
 
-    public function stories(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function pauses(): HasMany
     {
-        return $this->hasMany(Story::class);
+        return $this->hasMany(EpicPause::class);
+    }
+
+    /** The squads this epic is planned into, across all quarters. */
+    public function squads()
+    {
+        return $this->hasManyThrough(
+            Squad::class,
+            EpicQuarterPlan::class,
+            'epic_id',
+            'id',
+            'id',
+            'squad_id',
+        )->distinct();
+    }
+
+    /**
+     * Everything not sitting in a column the team marked as finished.
+     *
+     * An epic with no status counts as unfinished -- it has not been filed
+     * anywhere, so it is still somebody's problem.
+     */
+    public function scopeUnfinished($query)
+    {
+        return $query->where(fn ($q) => $q
+            ->whereNull('status_id')
+            ->orWhereHas('status', fn ($s) => $s->where('is_complete', false)));
+    }
+
+    public function isComplete(): bool
+    {
+        return (bool) $this->status?->is_complete;
+    }
+
+    public function scopeForQuarter($query, Quarter $quarter)
+    {
+        return $query->whereHas('quarterPlans', fn ($q) => $q
+            ->where('year', $quarter->year)
+            ->where('quarter', $quarter->quarter));
+    }
+
+    /**
+     * The currently open pause, if the epic has one recorded.
+     *
+     * Only counts while the column still says the work is stopped. A record
+     * left open after the card moved on is history, not the present, so it
+     * is not surfaced as a live pause.
+     */
+    public function openPause(): ?EpicPause
+    {
+        if (! $this->status?->requires_reason) {
+            return null;
+        }
+
+        return $this->pauses()->open()->latest('paused_at')->first();
     }
 }
