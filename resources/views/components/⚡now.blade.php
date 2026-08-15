@@ -848,7 +848,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     <article x-sort:item="{{ $epic->id }}" wire:key="card-{{ $epic->id }}"
                              wire:click="open({{ $epic->id }})"
                              class="group relative overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900
-                                    cursor-pointer hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors
+                                    cursor-pointer select-none hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors
                                     {{ $density === 'compact' ? 'pl-3 pr-2.5 py-2' : 'pl-3.5 pr-3 py-2.5' }}">
 
                         <span class="absolute inset-y-0 left-0 w-1" style="background-color: {{ $squadColor }}"

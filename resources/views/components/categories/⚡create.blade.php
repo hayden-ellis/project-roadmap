@@ -68,14 +68,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     <flux:error name="description" />
                 </flux:field>
 
-                <flux:field>
-                    <flux:label>Color</flux:label>
-                    <div class="flex items-center gap-4">
-                        <input type="color" wire:model.live="color" class="h-10 w-20 rounded border-zinc-300 dark:border-zinc-700" />
-                        <flux:input wire:model="color" placeholder="#6B7280" class="flex-1" />
-                    </div>
-                    <flux:error name="color" />
-                </flux:field>
+                <flux:color-picker wire:model.live="color" label="Color" placeholder="#6B7280" />
 
                 <div class="flex items-center gap-3">
                     <flux:button type="submit" variant="primary">Create Category</flux:button>

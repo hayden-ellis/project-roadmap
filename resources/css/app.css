@@ -52,8 +52,10 @@
     @apply rotate-3 shadow-xl opacity-100!;
   }
 
+  /* Important because the card's own bg/border utilities outrank a
+     components-layer class; without it the slot stays white. */
   .sortable-ghost {
-    @apply border-dashed border-zinc-300 bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800/60;
+    @apply border-dashed! border-zinc-400! bg-zinc-200/80! shadow-inner dark:border-zinc-500! dark:bg-zinc-800/80!;
   }
 
   .sortable-ghost > * {
@@ -61,10 +63,13 @@
   }
 }
 
-/* The plugin flags the body while a drag is live. */
+/* The plugin flags the body while a drag is live. The fallback drag is a
+   plain mouse-move to the browser, which would otherwise sweep a text
+   selection across the page as the card travels. */
 body.sorting,
 body.sorting * {
   cursor: grabbing !important;
+  user-select: none !important;
 }
 
 @layer base {

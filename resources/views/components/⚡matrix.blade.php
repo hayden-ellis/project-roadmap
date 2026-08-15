@@ -274,7 +274,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 {{-- The left edge is the squad, same as everywhere else. --}}
                 <article x-sort:item="{{ $epic->id }}" wire:key="matrix-{{ $epic->id }}"
                          class="group relative overflow-hidden flex items-center gap-2 rounded-lg border border-zinc-200 dark:border-zinc-700
-                                bg-white dark:bg-zinc-900 pl-3 pr-2.5 py-2 cursor-pointer
+                                bg-white dark:bg-zinc-900 pl-3 pr-2.5 py-2 cursor-pointer select-none
                                 hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors">
 
                     <span class="absolute inset-y-0 left-0 w-1" style="background-color: {{ $epic->squad->color ?? '#a1a1aa' }}"

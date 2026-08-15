@@ -331,18 +331,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     </div>
 
                     <div class="mt-4">
-                        <div class="{{ $micro }} mb-2">Colour</div>
-                        <div class="flex flex-wrap items-center gap-1.5">
-                            @foreach($palette as $swatch)
-                            <button type="button" wire:click="$set('color', '{{ $swatch }}')"
-                                    class="size-6 rounded-full transition-transform hover:scale-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
-                                           {{ $color === $swatch ? 'ring-2 ring-offset-2 ring-zinc-900 dark:ring-white dark:ring-offset-zinc-900' : '' }}"
-                                    style="background-color: {{ $swatch }}"
-                                    title="{{ $swatch }}">
-                                <span class="sr-only">Use {{ $swatch }}</span>
-                            </button>
-                            @endforeach
-                        </div>
+                        <flux:color-picker size="sm" label="Colour" wire:model.live="color" :swatches="$palette" />
                     </div>
 
                     <div class="mt-4 space-y-3">
@@ -396,19 +385,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     <flux:input size="sm" label="Description" placeholder="What belongs here" wire:model="description" />
                 </div>
 
-                <div>
-                    <div class="{{ $micro }} mb-2">Colour</div>
-                    <div class="flex flex-wrap items-center gap-1.5">
-                        @foreach($palette as $swatch)
-                        <button type="button" wire:click="$set('color', '{{ $swatch }}')"
-                                class="size-6 rounded-full transition-transform hover:scale-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent
-                                       {{ $color === $swatch ? 'ring-2 ring-offset-2 ring-zinc-900 dark:ring-white dark:ring-offset-zinc-900' : '' }}"
-                                style="background-color: {{ $swatch }}">
-                            <span class="sr-only">Use {{ $swatch }}</span>
-                        </button>
-                        @endforeach
-                    </div>
-                </div>
+                <flux:color-picker size="sm" label="Colour" wire:model.live="color" :swatches="$palette" />
 
                 <div class="flex items-center gap-3">
                     <flux:button type="submit" size="sm" variant="primary">Add status</flux:button>
