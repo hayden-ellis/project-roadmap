@@ -184,6 +184,63 @@ describe('filtering by squad', function () {
     });
 });
 
+describe('hiding columns', function () {
+    it('stops drawing a hidden column, and brings it back when toggled again', function () {
+        $component = Livewire::test('now')->call('toggleColumn', $this->paused->id);
+
+        $component->assertViewHas('columns', fn ($columns) => collect($columns)->pluck('status.name')->all()
+            === ['Backlog', 'In progress', 'Shipped']);
+
+        $component->call('toggleColumn', $this->paused->id);
+
+        $component->assertViewHas('columns', fn ($columns) => count($columns) === 4);
+    });
+
+    it('leaves the epics in a hidden column alone', function () {
+        $epic = ($this->makeEpic)('Wallet Top-ups', $this->paused);
+
+        Livewire::test('now')->call('toggleColumn', $this->paused->id);
+
+        expect($epic->fresh()->status_id)->toBe($this->paused->id);
+    });
+
+    it('shows everything again in one click', function () {
+        $component = Livewire::test('now')
+            ->call('toggleColumn', $this->paused->id)
+            ->call('toggleColumn', $this->shipped->id)
+            ->call('showAllColumns');
+
+        expect($component->get('hiddenColumns'))->toBe([]);
+
+        $component->assertViewHas('columns', fn ($columns) => count($columns) === 4);
+    });
+
+    it('offers the way back when every column is hidden', function () {
+        $component = Livewire::test('now');
+
+        foreach ([$this->backlog, $this->doing, $this->paused, $this->shipped] as $status) {
+            $component->call('toggleColumn', $status->id);
+        }
+
+        $component->assertSee('Show all columns');
+    });
+
+    it('forgets a hidden column whose status no longer exists', function () {
+        $component = Livewire::test('now')->set('hiddenColumns', ['999999']);
+
+        expect($component->get('hiddenColumns'))->toBe([]);
+
+        $component->assertViewHas('columns', fn ($columns) => count($columns) === 4);
+    });
+
+    it('refuses to hide another team\'s column', function () {
+        $otherUser = User::factory()->withPersonalTeam()->create();
+        $foreign = Status::create(['team_id' => $otherUser->currentTeam->id, 'name' => 'Theirs', 'color' => '#000000']);
+
+        Livewire::test('now')->call('toggleColumn', $foreign->id)->assertForbidden();
+    });
+});
+
 describe('dragging between columns', function () {
     it('moves an epic to the dropped column', function () {
         $epic = ($this->makeEpic)('Wallet Top-ups');

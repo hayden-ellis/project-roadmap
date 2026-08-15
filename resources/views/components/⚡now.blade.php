@@ -54,6 +54,34 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     public string $squadFilter = '';
 
     /**
+     * Columns the user has hidden to focus, as status ids. Remembered per
+     * user, like the squad filter. Absence means shown, so an empty list is
+     * the whole board and a brand-new status arrives visible.
+     *
+     * @var array<int, string>
+     */
+    #[Session(key: 'now.hiddenColumns')]
+    public array $hiddenColumns = [];
+
+    /**
+     * Hide or show one column. The epics in a hidden column are untouched --
+     * the board just stops drawing them.
+     */
+    public function toggleColumn(int $statusId): void
+    {
+        $id = (string) $this->teamStatus($statusId)->id;
+
+        $this->hiddenColumns = in_array($id, $this->hiddenColumns, true)
+            ? array_values(array_diff($this->hiddenColumns, [$id]))
+            : [...$this->hiddenColumns, $id];
+    }
+
+    public function showAllColumns(): void
+    {
+        $this->hiddenColumns = [];
+    }
+
+    /**
      * Drives the flyout's visibility.
      *
      * Flux modals have no `open` prop -- they are controlled by wire:model (or
@@ -604,6 +632,13 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
         $statuses = $team->statuses()->ordered()->get();
 
+        // A remembered hidden column can outlive its status. Forget it, so
+        // the count on the filter button never claims a ghost.
+        $this->hiddenColumns = array_values(array_intersect(
+            $this->hiddenColumns,
+            $statuses->pluck('id')->map(fn ($id) => (string) $id)->all(),
+        ));
+
         $epics = $team->epics()
             ->with(['category', 'status', 'quarterPlans.squad', 'pauses.supersededBy'])
             ->onBoard()
@@ -653,14 +688,18 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
         $byStatus = $visible->groupBy('status_id');
 
-        $columns = $statuses->map(fn ($status) => [
-            'status' => $status,
-            'epics' => $byStatus[$status->id] ?? collect(),
-        ]);
+        $columns = $statuses
+            ->reject(fn ($status) => in_array((string) $status->id, $this->hiddenColumns, true))
+            ->values()
+            ->map(fn ($status) => [
+                'status' => $status,
+                'epics' => $byStatus[$status->id] ?? collect(),
+            ]);
 
         return [
             'columns' => $columns,
             'statuses' => $statuses,
+            'filterCount' => ($this->squadFilter !== '' ? 1 : 0) + count($this->hiddenColumns),
             'unfiled' => $visible->whereNull('status_id')->values(),
             'weekLabel' => $week->format('M j'),
             'quarterLabel' => $quarter->label(),
@@ -754,17 +793,55 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             <flux:text class="mt-1">Week of {{ $weekLabel }} · {{ $quarterLabel }}</flux:text>
         </div>
         <div class="flex items-center gap-2">
-            {{-- Narrow the board to one squad's cards. Sticks per user, like
-                 the density toggle below. --}}
-            @if($squads->isNotEmpty())
-            <flux:select variant="listbox" wire:model.live="squadFilter" size="sm" class="w-44!" aria-label="Filter by squad">
-                <flux:select.option value="">All squads</flux:select.option>
-                @foreach($squads as $squad)
-                <flux:select.option value="{{ $squad->id }}">{{ $squad->name }}</flux:select.option>
-                @endforeach
-                <flux:select.option value="none">No squad</flux:select.option>
-            </flux:select>
-            @endif
+            {{-- Everything that narrows the board lives behind one control:
+                 which squad's cards, and which columns get drawn. The badge
+                 says how much of the board you are not seeing. --}}
+            <flux:dropdown position="bottom" align="end">
+                <flux:button size="sm" icon="funnel" icon:variant="micro">
+                    Filter
+                    @if($filterCount > 0)
+                    <span class="grid place-items-center min-w-[18px] h-[18px] px-1 rounded-full
+                                 bg-zinc-900 text-white dark:bg-white dark:text-zinc-900
+                                 text-[10px] font-semibold tabular-nums">{{ $filterCount }}</span>
+                    @endif
+                </flux:button>
+
+                <flux:menu class="w-60">
+                    @if($squads->isNotEmpty())
+                    <flux:menu.group heading="Squad">
+                        <flux:menu.radio.group wire:model.live="squadFilter">
+                            <flux:menu.radio value="">All squads</flux:menu.radio>
+                            @foreach($squads as $squad)
+                            <flux:menu.radio value="{{ $squad->id }}">{{ $squad->name }}</flux:menu.radio>
+                            @endforeach
+                            <flux:menu.radio value="none">No squad</flux:menu.radio>
+                        </flux:menu.radio.group>
+                    </flux:menu.group>
+
+                    <flux:menu.separator />
+                    @endif
+
+                    {{-- Checked means drawn. The dots match the column
+                         headers, so the list reads as a map of the board. --}}
+                    <flux:menu.group heading="Columns">
+                        @foreach($statuses as $status)
+                        <flux:menu.checkbox wire:click="toggleColumn({{ $status->id }})"
+                                            :checked="! in_array((string) $status->id, $hiddenColumns, true)">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <span class="size-2 rounded-full shrink-0" style="background-color: {{ $status->color }}"></span>
+                                <span class="truncate">{{ $status->name }}</span>
+                            </div>
+                        </flux:menu.checkbox>
+                        @endforeach
+                    </flux:menu.group>
+
+                    <flux:menu.separator />
+
+                    <flux:menu.item icon="adjustments-horizontal" href="/statuses" wire:navigate>
+                        Edit columns
+                    </flux:menu.item>
+                </flux:menu>
+            </flux:dropdown>
 
             {{-- How much a card shows. Sticks per user, because the right
                  answer depends on how many epics you are carrying. --}}
@@ -784,10 +861,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 @endforeach
             </div>
 
-            <flux:button href="/statuses" variant="ghost" size="sm" icon="adjustments-horizontal" wire:navigate>
-                Edit columns
-            </flux:button>
-            <flux:button icon="plus" wire:click="newEpic">New epic</flux:button>
+            <flux:button size="sm" variant="primary" icon="plus" wire:click="newEpic">New epic</flux:button>
         </div>
     </div>
 
@@ -798,6 +872,16 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             <flux:heading size="lg" class="mt-4">No columns yet</flux:heading>
             <flux:text class="mt-2">Set up the statuses your team works in and this board fills itself.</flux:text>
             <flux:button href="/statuses" variant="primary" class="mt-6" wire:navigate>Set up statuses</flux:button>
+        </div>
+    </flux:card>
+    @elseif($columns->isEmpty())
+    {{-- The filter can hide the whole board. Say so, and hand back the way out. --}}
+    <flux:card>
+        <div class="text-center py-12">
+            <flux:icon.eye-slash class="mx-auto h-12 w-12 text-zinc-400" />
+            <flux:heading size="lg" class="mt-4">All columns are hidden</flux:heading>
+            <flux:text class="mt-2">The filter is hiding every column on the board.</flux:text>
+            <flux:button variant="primary" class="mt-6" wire:click="showAllColumns">Show all columns</flux:button>
         </div>
     </flux:card>
     @else
