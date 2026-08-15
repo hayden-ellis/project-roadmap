@@ -800,7 +800,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 <flux:button size="sm" icon="funnel" icon:variant="micro">
                     Filter
                     @if($filterCount > 0)
-                    <span class="grid place-items-center min-w-[18px] h-[18px] px-1 rounded-full
+                    <span class="inline-grid place-items-center align-middle min-w-[18px] h-[18px] px-1 rounded-full
                                  bg-zinc-900 text-white dark:bg-white dark:text-zinc-900
                                  text-[10px] font-semibold tabular-nums">{{ $filterCount }}</span>
                     @endif
