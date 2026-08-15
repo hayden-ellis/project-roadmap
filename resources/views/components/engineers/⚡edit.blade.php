@@ -11,10 +11,20 @@ use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
 use Livewire\Attributes\Validate;
 use Livewire\Component;
+use Livewire\WithFileUploads;
 
 new #[Layout('components.layouts.app.sidebar')] class extends Component
 {
+    use WithFileUploads;
+
     public Engineer $engineer;
+
+    /**
+     * A photo, applied the moment it is picked -- no save button involved.
+     * Stored locally on the public disk, so the roster works offline and no
+     * face ever leaves the machine.
+     */
+    public $avatarUpload = null;
 
     #[Validate('required|string|max:255')]
     public string $name = '';
@@ -69,6 +79,26 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     public function updatedQuarter(): void
     {
         $this->loadQuarter();
+    }
+
+    public function updatedAvatarUpload(): void
+    {
+        $this->authorize('update', $this->engineer);
+
+        $this->validate(['avatarUpload' => 'image|max:2048'], [
+            'avatarUpload.image' => 'That file is not an image.',
+            'avatarUpload.max' => 'Keep it under 2 MB.',
+        ]);
+
+        $this->engineer->updateAvatar($this->avatarUpload);
+        $this->avatarUpload = null;
+    }
+
+    public function removeAvatar(): void
+    {
+        $this->authorize('update', $this->engineer);
+
+        $this->engineer->deleteAvatar();
     }
 
     private function loadQuarter(): void
@@ -155,6 +185,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     public function delete(): void
     {
         $this->authorize('delete', $this->engineer);
+        $this->engineer->deleteAvatar();
         $this->engineer->delete();
 
         $this->redirect('/engineers', navigate: true);
@@ -196,10 +227,28 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 <div class="max-w-4xl">
     <div class="flex items-start justify-between gap-4 pt-8 pb-8">
         <div class="flex items-center gap-4">
-            <x-engineer-avatar :engineer="$engineer" size="lg" :tooltip="false" />
+            {{-- The face is the control: click it to change it. --}}
+            <label class="relative block cursor-pointer group/avatar" title="Change photo">
+                <x-engineer-avatar :engineer="$engineer" size="lg" :tooltip="false" />
+                <span class="absolute inset-0 grid place-items-center rounded-full bg-black/40
+                             opacity-0 group-hover/avatar:opacity-100 transition-opacity">
+                    <flux:icon.camera variant="mini" class="text-white" />
+                </span>
+                <input type="file" accept="image/png,image/jpeg,image/webp" wire:model="avatarUpload" class="sr-only" />
+            </label>
             <div>
                 <h1>{{ $engineer->name }}</h1>
                 <flux:text class="mt-1">{{ $engineer->title ?? 'Engineer' }}{{ $engineer->squad ? ' · '.$engineer->squad->name : '' }}</flux:text>
+                <div class="mt-1 flex items-center gap-3">
+                    <span class="text-xs text-zinc-400" wire:loading wire:target="avatarUpload">Uploading…</span>
+                    @if($engineer->avatar_path)
+                    <button type="button" wire:click="removeAvatar" wire:loading.remove wire:target="avatarUpload"
+                            class="text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 cursor-pointer">
+                        Remove photo
+                    </button>
+                    @endif
+                </div>
+                <flux:error name="avatarUpload" />
             </div>
         </div>
         <flux:button href="/engineers" variant="ghost" wire:navigate>Back</flux:button>

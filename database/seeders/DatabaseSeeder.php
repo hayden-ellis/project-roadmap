@@ -8,6 +8,7 @@ use App\Models\Engineer;
 use App\Models\EngineerQuarterCapacity;
 use App\Models\EngineerWeekCapacity;
 use App\Models\Epic;
+use App\Models\EpicComment;
 use App\Models\EpicPause;
 use App\Models\EpicQuarterPlan;
 use App\Models\Squad;
@@ -246,6 +247,38 @@ class DatabaseSeeder extends Seeder
             'paused_at' => $weeks[3],
             'reason' => 'Traded for reporting work the exec review needed',
             'superseded_by_epic_id' => $epics['Usage Reporting V2']->id,
+        ]);
+
+        // ---------------------------------------------------------- comments
+        // A second account on the team, so the threads read as conversation
+        // rather than one person talking to themselves.
+        $teammate = User::factory()->create([
+            'name' => 'Priya Nair',
+            'email' => 'priya@example.com',
+            'password' => 'password',
+        ]);
+        $team->users()->attach($teammate, ['role' => 'editor']);
+
+        $scheduler = EpicComment::forceCreate([
+            'epic_id' => $epics['Smart Charging Scheduler']->id,
+            'user_id' => $teammate->id,
+            'body' => 'Vendor confirmed the OCPP fix ships Friday — unblocks the pilot sites.',
+            'created_at' => now()->subDays(5),
+        ]);
+
+        EpicComment::forceCreate([
+            'epic_id' => $epics['Smart Charging Scheduler']->id,
+            'user_id' => $user->id,
+            'parent_id' => $scheduler->id,
+            'body' => "Great — I'll keep Raj and Mia booked through the rollout weeks then.",
+            'created_at' => now()->subDays(4),
+        ]);
+
+        EpicComment::forceCreate([
+            'epic_id' => $epics['PSD2 Compliance']->id,
+            'user_id' => $user->id,
+            'body' => 'Still blocked on vendor certification. Chasing them again this week.',
+            'created_at' => now()->subDays(2),
         ]);
     }
 }

@@ -107,6 +107,11 @@ class Epic extends Model
         return $this->hasMany(EpicPause::class);
     }
 
+    public function comments(): HasMany
+    {
+        return $this->hasMany(EpicComment::class);
+    }
+
     /** The squads this epic is planned into, across all quarters. */
     public function squads()
     {

@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * A person the EM plans capacity for.
@@ -25,6 +27,7 @@ class Engineer extends Model
         'name',
         'email',
         'title',
+        'avatar_path',
         'default_weekly_points',
         'is_active',
         'sort_order',
@@ -82,15 +85,45 @@ class Engineer extends Model
     /**
      * A real photo, or null to fall back to initials.
      *
+     * The engineer's own uploaded photo wins; a linked user account's photo
+     * is the fallback for people who manage their own.
+     *
      * Deliberately not Jetstream's profile_photo_url: that silently falls back
      * to ui-avatars.com, which is a network request per face and sends the
      * team's names to a third party. Only an actually uploaded photo counts.
      */
     public function avatarUrl(): ?string
     {
+        if ($this->avatar_path) {
+            return Storage::disk('public')->url($this->avatar_path);
+        }
+
         return $this->user?->profile_photo_path
             ? $this->user->profile_photo_url
             : null;
+    }
+
+    /** Stores the new photo, replaces the path, and cleans up the old file. */
+    public function updateAvatar(UploadedFile $photo): void
+    {
+        $previous = $this->avatar_path;
+
+        $this->update(['avatar_path' => $photo->store('engineer-avatars', 'public')]);
+
+        if ($previous) {
+            Storage::disk('public')->delete($previous);
+        }
+    }
+
+    public function deleteAvatar(): void
+    {
+        if (! $this->avatar_path) {
+            return;
+        }
+
+        Storage::disk('public')->delete($this->avatar_path);
+
+        $this->update(['avatar_path' => null]);
     }
 
     public function initials(): string

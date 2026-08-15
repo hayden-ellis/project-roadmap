@@ -3,6 +3,7 @@
 use App\Models\Allocation;
 use App\Models\Engineer;
 use App\Models\Epic;
+use App\Models\EpicComment;
 use App\Models\EpicQuarterPlan;
 use App\Models\Status;
 use App\Services\CapacityService;
@@ -69,6 +70,16 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     public array $delivered_points = [];
 
     public bool $confirmingDeletion = false;
+
+    public string $commentBody = '';
+
+    /** Comment a reply composer is open under, or null for the top-level box. */
+    public ?int $replyingToId = null;
+
+    /** Comment whose body is being edited inline, or null. */
+    public ?int $editingCommentId = null;
+
+    public string $editCommentBody = '';
 
     public function mount(Epic $epic): void
     {
@@ -406,6 +417,105 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         );
     }
 
+    // --------------------------------------------------------------- comments
+
+    public function addComment(): void
+    {
+        $this->authorize('update', $this->epic);
+
+        $this->validate([
+            'commentBody' => 'required|string|max:5000',
+        ], [
+            'commentBody.required' => 'Say something first.',
+        ]);
+
+        $parentId = null;
+
+        if ($this->replyingToId !== null) {
+            $parent = $this->epic->comments()->findOr($this->replyingToId, fn () => abort(403));
+
+            // Replying to a reply joins the same thread: threading is one
+            // level deep, so everything re-roots onto the top-level comment.
+            $parentId = $parent->parent_id ?? $parent->id;
+        }
+
+        EpicComment::create([
+            'epic_id' => $this->epic->id,
+            'user_id' => Auth::id(),
+            'parent_id' => $parentId,
+            'body' => $this->commentBody,
+        ]);
+
+        $this->commentBody = '';
+        $this->replyingToId = null;
+        $this->resetErrorBag('commentBody');
+    }
+
+    public function replyTo(int $commentId): void
+    {
+        // One shared commentBody serves both composers -- only one is ever
+        // visible at a time, so toggling clears the draft either way.
+        $this->replyingToId = $this->replyingToId === $commentId ? null : $commentId;
+        $this->commentBody = '';
+        $this->editingCommentId = null;
+        $this->editCommentBody = '';
+        $this->resetErrorBag(['commentBody', 'editCommentBody']);
+    }
+
+    public function editComment(int $commentId): void
+    {
+        $comment = $this->epic->comments()->findOr($commentId, fn () => abort(403));
+
+        $this->authorize('update', $comment);
+
+        $this->editingCommentId = $comment->id;
+        $this->editCommentBody = $comment->body;
+        $this->replyingToId = null;
+        $this->commentBody = '';
+        $this->resetErrorBag(['commentBody', 'editCommentBody']);
+    }
+
+    public function cancelEditComment(): void
+    {
+        $this->editingCommentId = null;
+        $this->editCommentBody = '';
+        $this->resetErrorBag('editCommentBody');
+    }
+
+    public function updateComment(): void
+    {
+        $comment = $this->epic->comments()->findOr($this->editingCommentId, fn () => abort(403));
+
+        $this->authorize('update', $comment);
+
+        $this->validate([
+            'editCommentBody' => 'required|string|max:5000',
+        ], [
+            'editCommentBody.required' => 'Say something first.',
+        ]);
+
+        $comment->update(['body' => $this->editCommentBody]);
+
+        $this->cancelEditComment();
+    }
+
+    public function deleteComment(int $commentId): void
+    {
+        $comment = $this->epic->comments()->findOr($commentId, fn () => abort(403));
+
+        $this->authorize('delete', $comment);
+
+        // The DB cascade sweeps the thread's replies along with the root.
+        $comment->delete();
+
+        if ($this->editingCommentId === $commentId) {
+            $this->cancelEditComment();
+        }
+        if ($this->replyingToId === $commentId) {
+            $this->replyingToId = null;
+        }
+    }
+
     public function with(): array
     {
         $team = Auth::user()->currentTeam;
@@ -464,6 +574,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             ];
         });
 
+        $comments = $this->epic->comments()->with('user')->oldest('created_at')->get();
+
         return [
             'squads' => $team->squads()->ordered()->get(),
             'categories' => $team->categories()->ordered()->get(),
@@ -481,6 +593,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 ->only($this->squad_ids)
                 ->sum(),
             'openPause' => $this->epic->openPause(),
+            'openComments' => $comments->whereNull('parent_id')->values(),
+            'openReplies' => $comments->whereNotNull('parent_id')->groupBy('parent_id'),
         ];
     }
 };
@@ -770,6 +884,106 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
                     <flux:text class="text-xs pt-1">Delivered is kept by hand — update it at review.</flux:text>
                 </div>
+                @endif
+            </div>
+
+            {{-- Comments: the part of the record that only reads as prose.
+                 One level of threading -- replying to a reply joins the same
+                 thread. Editing and deleting stay with the author. --}}
+            <div class="{{ $panel }} p-5 space-y-4">
+                <div class="{{ $micro }}">Comments</div>
+
+                @forelse($openComments as $comment)
+                <div wire:key="comment-{{ $comment->id }}" class="flex gap-3">
+                    <flux:avatar circle size="sm" :name="$comment->user->name" :src="$comment->user->profile_photo_url" />
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-baseline gap-2">
+                            <span class="text-sm font-medium truncate">{{ $comment->user->name }}</span>
+                            <span class="text-[11px] text-zinc-400 dark:text-zinc-500 shrink-0">{{ $comment->created_at->diffForHumans() }}</span>
+                            <span class="flex-1"></span>
+                            <flux:button size="xs" variant="ghost" wire:click="replyTo({{ $comment->id }})">Reply</flux:button>
+                            @if($comment->user_id === Auth::id())
+                            <flux:button size="xs" variant="ghost" icon="pencil"
+                                         wire:click="editComment({{ $comment->id }})" title="Edit comment" />
+                            <flux:button size="xs" variant="ghost" icon="trash"
+                                         wire:click="deleteComment({{ $comment->id }})"
+                                         wire:confirm="Delete this comment{{ ($openReplies[$comment->id] ?? collect())->isNotEmpty() ? ' and its replies' : '' }}?"
+                                         title="Delete comment" />
+                            @endif
+                        </div>
+
+                        @if($editingCommentId === $comment->id)
+                        <form wire:submit="updateComment" class="mt-1.5 space-y-2">
+                            <flux:textarea wire:model="editCommentBody" rows="3" />
+                            <flux:error name="editCommentBody" />
+                            <div class="flex justify-end gap-2">
+                                <flux:button type="button" size="xs" variant="ghost" wire:click="cancelEditComment">Cancel</flux:button>
+                                <flux:button type="submit" size="xs" variant="filled">Save</flux:button>
+                            </div>
+                        </form>
+                        @else
+                        <div class="text-sm leading-relaxed whitespace-pre-line text-zinc-700 dark:text-zinc-300">{{ $comment->body }}</div>
+                        @endif
+
+                        @foreach($openReplies[$comment->id] ?? [] as $reply)
+                        <div wire:key="comment-{{ $reply->id }}" class="flex gap-3 mt-3 pl-10">
+                            <flux:avatar circle size="sm" :name="$reply->user->name" :src="$reply->user->profile_photo_url" />
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-baseline gap-2">
+                                    <span class="text-sm font-medium truncate">{{ $reply->user->name }}</span>
+                                    <span class="text-[11px] text-zinc-400 dark:text-zinc-500 shrink-0">{{ $reply->created_at->diffForHumans() }}</span>
+                                    <span class="flex-1"></span>
+                                    {{-- A reply's Reply button passes its own id; addComment re-roots it. --}}
+                                    <flux:button size="xs" variant="ghost" wire:click="replyTo({{ $reply->id }})">Reply</flux:button>
+                                    @if($reply->user_id === Auth::id())
+                                    <flux:button size="xs" variant="ghost" icon="pencil"
+                                                 wire:click="editComment({{ $reply->id }})" title="Edit reply" />
+                                    <flux:button size="xs" variant="ghost" icon="trash"
+                                                 wire:click="deleteComment({{ $reply->id }})"
+                                                 wire:confirm="Delete this reply?" title="Delete reply" />
+                                    @endif
+                                </div>
+
+                                @if($editingCommentId === $reply->id)
+                                <form wire:submit="updateComment" class="mt-1.5 space-y-2">
+                                    <flux:textarea wire:model="editCommentBody" rows="3" />
+                                    <flux:error name="editCommentBody" />
+                                    <div class="flex justify-end gap-2">
+                                        <flux:button type="button" size="xs" variant="ghost" wire:click="cancelEditComment">Cancel</flux:button>
+                                        <flux:button type="submit" size="xs" variant="filled">Save</flux:button>
+                                    </div>
+                                </form>
+                                @else
+                                <div class="text-sm leading-relaxed whitespace-pre-line text-zinc-700 dark:text-zinc-300">{{ $reply->body }}</div>
+                                @endif
+                            </div>
+                        </div>
+                        @endforeach
+
+                        @if($replyingToId === $comment->id || ($openReplies[$comment->id] ?? collect())->contains('id', $replyingToId))
+                        <form wire:submit="addComment" class="mt-3 pl-10 space-y-2">
+                            <flux:textarea wire:model="commentBody" rows="2" placeholder="Reply…" autofocus />
+                            <flux:error name="commentBody" />
+                            <div class="flex justify-end gap-2">
+                                <flux:button type="button" size="xs" variant="ghost" wire:click="replyTo({{ $replyingToId }})">Cancel</flux:button>
+                                <flux:button type="submit" size="xs" variant="filled">Reply</flux:button>
+                            </div>
+                        </form>
+                        @endif
+                    </div>
+                </div>
+                @empty
+                <flux:text class="text-sm">Nothing said yet. Leave the first comment.</flux:text>
+                @endforelse
+
+                @if($replyingToId === null)
+                <form wire:submit="addComment" class="space-y-2">
+                    <flux:textarea wire:model="commentBody" rows="3" placeholder="Leave a comment…" />
+                    <flux:error name="commentBody" />
+                    <div class="flex justify-end">
+                        <flux:button type="submit" size="sm" variant="filled">Comment</flux:button>
+                    </div>
+                </form>
                 @endif
             </div>
         </div>

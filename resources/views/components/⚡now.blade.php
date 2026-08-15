@@ -2,6 +2,7 @@
 
 use App\Models\Allocation;
 use App\Models\Epic;
+use App\Models\EpicComment;
 use App\Models\EpicPause;
 use App\Models\EpicQuarterPlan;
 use App\Models\Status;
@@ -110,9 +111,26 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     /** Which form the flyout is showing: null or 'pause'. */
     public ?string $panel = null;
 
+    /**
+     * Which room of the flyout is open: 'details' or 'comments'. Facts and
+     * conversation are different jobs, so they get different tabs rather
+     * than one long scroll.
+     */
+    public string $flyoutTab = 'details';
+
     public string $pauseReason = '';
 
     public ?int $supersededById = null;
+
+    public string $commentBody = '';
+
+    /** Comment a reply composer is open under, or null for the top-level box. */
+    public ?int $replyingToId = null;
+
+    /** Comment whose body is being edited inline, or null. */
+    public ?int $editingCommentId = null;
+
+    public string $editCommentBody = '';
 
     // The open epic's own fields, editable in place. Like the edit page,
     // each one writes as it changes -- there is no save button.
@@ -139,6 +157,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->showFlyout = true;
         $this->creating = false;
         $this->panel = null;
+        $this->flyoutTab = 'details';
         $this->resetForms();
         $this->syncEditFields($epic);
     }
@@ -253,10 +272,19 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->resetForms();
     }
 
+    public function setFlyoutTab(string $tab): void
+    {
+        $this->flyoutTab = in_array($tab, ['details', 'comments'], true) ? $tab : 'details';
+    }
+
     private function resetForms(): void
     {
         $this->pauseReason = '';
         $this->supersededById = null;
+        $this->commentBody = '';
+        $this->replyingToId = null;
+        $this->editingCommentId = null;
+        $this->editCommentBody = '';
         $this->resetErrorBag();
     }
 
@@ -584,6 +612,109 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->clearFrom($epic, CapacityService::for(Auth::user()->currentTeam)->currentWeek(), $engineerId);
     }
 
+    // --------------------------------------------------------------- comments
+
+    public function addComment(): void
+    {
+        $epic = $this->teamEpic($this->openEpicId);
+        $this->authorize('update', $epic);
+
+        $this->validate([
+            'commentBody' => 'required|string|max:5000',
+        ], [
+            'commentBody.required' => 'Say something first.',
+        ]);
+
+        $parentId = null;
+
+        if ($this->replyingToId !== null) {
+            $parent = $epic->comments()->findOr($this->replyingToId, fn () => abort(403));
+
+            // Replying to a reply joins the same thread: threading is one
+            // level deep, so everything re-roots onto the top-level comment.
+            $parentId = $parent->parent_id ?? $parent->id;
+        }
+
+        EpicComment::create([
+            'epic_id' => $epic->id,
+            'user_id' => Auth::id(),
+            'parent_id' => $parentId,
+            'body' => $this->commentBody,
+        ]);
+
+        $this->commentBody = '';
+        $this->replyingToId = null;
+        $this->resetErrorBag('commentBody');
+    }
+
+    public function replyTo(int $commentId): void
+    {
+        // One shared commentBody serves both composers -- only one is ever
+        // visible at a time, so toggling clears the draft either way.
+        $this->replyingToId = $this->replyingToId === $commentId ? null : $commentId;
+        $this->commentBody = '';
+        $this->editingCommentId = null;
+        $this->editCommentBody = '';
+        $this->resetErrorBag(['commentBody', 'editCommentBody']);
+    }
+
+    public function editComment(int $commentId): void
+    {
+        $epic = $this->teamEpic($this->openEpicId);
+        $comment = $epic->comments()->findOr($commentId, fn () => abort(403));
+
+        $this->authorize('update', $comment);
+
+        $this->editingCommentId = $comment->id;
+        $this->editCommentBody = $comment->body;
+        $this->replyingToId = null;
+        $this->commentBody = '';
+        $this->resetErrorBag(['commentBody', 'editCommentBody']);
+    }
+
+    public function cancelEditComment(): void
+    {
+        $this->editingCommentId = null;
+        $this->editCommentBody = '';
+        $this->resetErrorBag('editCommentBody');
+    }
+
+    public function updateComment(): void
+    {
+        $epic = $this->teamEpic($this->openEpicId);
+        $comment = $epic->comments()->findOr($this->editingCommentId, fn () => abort(403));
+
+        $this->authorize('update', $comment);
+
+        $this->validate([
+            'editCommentBody' => 'required|string|max:5000',
+        ], [
+            'editCommentBody.required' => 'Say something first.',
+        ]);
+
+        $comment->update(['body' => $this->editCommentBody]);
+
+        $this->cancelEditComment();
+    }
+
+    public function deleteComment(int $commentId): void
+    {
+        $epic = $this->teamEpic($this->openEpicId);
+        $comment = $epic->comments()->findOr($commentId, fn () => abort(403));
+
+        $this->authorize('delete', $comment);
+
+        // The DB cascade sweeps the thread's replies along with the root.
+        $comment->delete();
+
+        if ($this->editingCommentId === $commentId) {
+            $this->cancelEditComment();
+        }
+        if ($this->replyingToId === $commentId) {
+            $this->replyingToId = null;
+        }
+    }
+
     // ----------------------------------------------------------------- shared
 
     private function teamEpic(?int $epicId): Epic
@@ -725,8 +856,15 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 'openCrew' => collect(),
                 'openPlan' => null,
                 'openStaffedPoints' => 0,
+                'openComments' => collect(),
+                'openReplies' => collect(),
+                'openCommentCount' => 0,
             ];
         }
+
+        // Comments load only here, not in the board query -- the board never
+        // shows them, so the cost is paid only while the flyout is open.
+        $epic->load('comments.user');
 
         $openCrew = Allocation::where('epic_id', $epic->id)
             ->where('week_start', '>=', $week->toDateString())
@@ -754,6 +892,9 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 ->with('squad')->active()->ordered()->get()
                 ->reject(fn ($engineer) => $crewIds->contains($engineer->id))
                 ->values(),
+            'openComments' => $epic->comments->whereNull('parent_id')->sortBy('created_at')->values(),
+            'openReplies' => $epic->comments->whereNotNull('parent_id')->sortBy('created_at')->groupBy('parent_id'),
+            'openCommentCount' => $epic->comments->count(),
         ];
     }
 };
@@ -909,21 +1050,24 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
                 </header>
 
-                {{-- A short column still needs somewhere to aim at, so the
-                     drop area keeps a floor regardless of what is in it. --}}
+                {{-- An empty drop area takes no room -- the Add epic button
+                     below is the empty state, and reserving blank space above
+                     it just looks broken. emptyInsertThreshold is what keeps
+                     the column droppable anyway: a drag within that many
+                     pixels of the collapsed area gets pulled in. --}}
                 {{-- forceFallback swaps the browser's washed-out native drag
                      image for a real clone we can style (see app.css), and the
                      tolerance means a press has to travel a few pixels before
                      it becomes a drag -- clicks stay clicks. --}}
-                <div class="p-2 space-y-2 min-h-[11rem]"
+                <div class="p-2 space-y-2"
                      x-sort.ghost="$wire.moveEpic($item, $position, {{ $status->id }})"
                      x-sort:group="board"
                      {{-- fallbackOnBody: the clone is position:fixed, and the
                           board's contain:paint wrapper would otherwise become
                           its containing block and drag it far from the cursor. --}}
-                     x-sort:config="{ forceFallback: true, fallbackTolerance: 5, fallbackOnBody: true }">
+                     x-sort:config="{ forceFallback: true, fallbackTolerance: 5, fallbackOnBody: true, emptyInsertThreshold: 64 }">
 
-                    @forelse($column['epics'] as $epic)
+                    @foreach($column['epics'] as $epic)
                     @php
                         $squadColor = $epic->squad->color ?? '#a1a1aa';
                         $faces = $density === 'compact' ? 3 : 5;
@@ -933,11 +1077,18 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     {{-- The left edge is the squad, at every density. It costs no
                          horizontal room, so the one fact that would otherwise be
                          cut from a compact card survives. --}}
-                    {{-- The whole card opens the flyout. A press that moves
-                         becomes a drag instead -- the sort plugin swallows the
-                         click when that happens, so the two don't collide. --}}
+                    {{-- The whole card opens the flyout. In fallback mode the
+                         sort plugin does NOT swallow the click that fires when
+                         a drag is released, so the card measures for itself:
+                         a "click" whose pointer travelled since pressing was a
+                         drop, not a click. The 5px line matches
+                         fallbackTolerance above -- below it nothing dragged,
+                         at it the press became a drag. Keyboard activation
+                         (detail 0) always opens. --}}
                     <article x-sort:item="{{ $epic->id }}" wire:key="card-{{ $epic->id }}"
-                             wire:click="open({{ $epic->id }})"
+                             x-data="{ downX: 0, downY: 0 }"
+                             x-on:pointerdown="downX = $event.clientX; downY = $event.clientY"
+                             x-on:click="($event.detail === 0 || Math.hypot($event.clientX - downX, $event.clientY - downY) < 5) && $wire.open({{ $epic->id }})"
                              class="group relative overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900
                                     cursor-pointer select-none hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors
                                     {{ $density === 'compact' ? 'pl-3 pr-2.5 py-2' : 'pl-3.5 pr-3 py-2.5' }}">
@@ -953,7 +1104,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                   title="{{ $epic->flag['label'] }}"></span>
                             @endif
 
-                            <button type="button" wire:click.stop="open({{ $epic->id }})"
+                            {{-- No handler of its own: the click bubbles to the
+                                 card's drag-aware one. The button stays for
+                                 focus and keyboard reach. --}}
+                            <button type="button"
                                     class="flex-1 min-w-0 text-left text-[13px] font-medium leading-snug truncate text-zinc-900 dark:text-zinc-100 cursor-pointer">
                                 {{ $epic->title }}
                             </button>
@@ -976,7 +1130,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                         </div>
 
                         @else
-                        <button type="button" wire:click.stop="open({{ $epic->id }})"
+                        {{-- No handler of its own: the click bubbles to the
+                             card's drag-aware one. The button stays for focus
+                             and keyboard reach. --}}
+                        <button type="button"
                                 class="block w-full text-left text-[13px] font-medium leading-snug text-zinc-900 dark:text-zinc-100 cursor-pointer">
                             {{ $epic->title }}
                         </button>
@@ -1016,8 +1173,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                             <div class="flex flex-wrap gap-1">
                                 @foreach($epic->crew as $engineer)
                                 <span class="inline-flex items-center gap-1.5 pl-0.5 pr-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800">
-                                    <x-engineer-avatar :engineer="$engineer" size="xs" :tooltip="false" class="size-4!" />
-                                    <span class="text-[10px] text-zinc-600 dark:text-zinc-300">{{ $engineer->name }}</span>
+                                    <x-engineer-avatar :engineer="$engineer" size="xs" :tooltip="false" />
+                                    <span class="text-[11px] text-zinc-600 dark:text-zinc-300">{{ $engineer->name }}</span>
                                 </span>
                                 @endforeach
                             </div>
@@ -1050,11 +1207,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                         @endif
                         @endif
                     </article>
-                    @empty
-                    <div class="rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700 py-6 px-3 text-center">
-                        <flux:text class="text-xs">Nothing here. Drag an epic in.</flux:text>
-                    </div>
-                    @endforelse
+                    @endforeach
                 </div>
 
                 {{-- A card-shaped invitation at the foot of every column. It
@@ -1166,24 +1319,36 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             </div>
         </form>
         @elseif($openEpic)
-        <div class="space-y-5">
+        {{-- min-height is the viewport minus the modal's p-6, so mt-auto can
+             pin the move rail to the bottom edge even when content is short.
+             (min-h-full has nothing to resolve against inside the dialog.) --}}
+        <div class="flex min-h-[calc(100dvh-3rem)] flex-col">
             {{-- Identity. Every field here writes as it changes; the full page
                  is only needed for dates and the week spine. The close button
-                 owns the top-right corner, so this row leaves it alone. --}}
+                 owns the top-right corner, so the badge row leaves it alone. --}}
             <div class="pr-8">
                 <div class="flex items-center gap-2">
-                    <input type="text" wire:model.live.debounce.600ms="editTitle" placeholder="Untitled epic"
-                           aria-label="Epic title"
-                           class="flex-1 min-w-0 bg-transparent border-0 border-b border-transparent px-0 py-0.5
-                                  text-lg font-semibold text-zinc-900 dark:text-zinc-100
-                                  placeholder:text-zinc-300 dark:placeholder:text-zinc-600
-                                  hover:border-zinc-200 dark:hover:border-zinc-700
-                                  focus:border-accent focus:ring-0 focus:outline-none transition-colors" />
+                    @if($openEpic->status)
+                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold shrink-0"
+                          style="background-color: {{ $openEpic->status->color }}1f; color: {{ $openEpic->status->color }}">
+                        <span class="size-1.5 rounded-full" style="background-color: {{ $openEpic->status->color }}"></span>
+                        {{ $openEpic->status->name }}
+                    </span>
+                    @endif
+                    <span class="flex-1"></span>
                     <span class="text-[11px] font-medium text-zinc-400 shrink-0" wire:loading.delay
                           wire:target="editTitle, editCategoryId, editSquadId, editPriority, editDescription, editPlannedPoints">Saving…</span>
                     <flux:button size="xs" variant="ghost" icon="arrow-top-right-on-square"
                                  href="/epics/{{ $openEpic->id }}/edit" wire:navigate>Full view</flux:button>
                 </div>
+
+                <input type="text" wire:model.live.debounce.600ms="editTitle" placeholder="Untitled epic"
+                       aria-label="Epic title"
+                       class="mt-3 w-full min-w-0 bg-transparent border-0 border-b border-transparent px-0 py-0.5
+                              text-lg font-semibold text-zinc-900 dark:text-zinc-100
+                              placeholder:text-zinc-300 dark:placeholder:text-zinc-600
+                              hover:border-zinc-200 dark:hover:border-zinc-700
+                              focus:border-accent focus:ring-0 focus:outline-none transition-colors" />
                 <flux:error name="editTitle" />
 
                 <textarea wire:model.live.debounce.800ms="editDescription" rows="2"
@@ -1196,8 +1361,32 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 <flux:error name="editDescription" />
             </div>
 
+            {{-- Two rooms: facts and conversation never fight for one scroll. --}}
+            <div class="mt-4 flex gap-1 border-b border-zinc-200 dark:border-zinc-700">
+                <button type="button" wire:click="setFlyoutTab('details')"
+                        class="-mb-px px-3 pt-1.5 pb-2.5 text-[13px] font-semibold border-b-2 transition-colors
+                               {{ $flyoutTab === 'details'
+                                  ? 'text-zinc-900 dark:text-zinc-100 border-zinc-900 dark:border-zinc-100'
+                                  : 'text-zinc-400 dark:text-zinc-500 border-transparent hover:text-zinc-600 dark:hover:text-zinc-300' }}">
+                    Details
+                </button>
+                <button type="button" wire:click="setFlyoutTab('comments')"
+                        class="-mb-px px-3 pt-1.5 pb-2.5 text-[13px] font-semibold border-b-2 transition-colors inline-flex items-center gap-1.5
+                               {{ $flyoutTab === 'comments'
+                                  ? 'text-zinc-900 dark:text-zinc-100 border-zinc-900 dark:border-zinc-100'
+                                  : 'text-zinc-400 dark:text-zinc-500 border-transparent hover:text-zinc-600 dark:hover:text-zinc-300' }}">
+                    Comments
+                    @if($openCommentCount > 0)
+                    <span class="text-[10.5px] font-bold px-1.5 py-px rounded-full bg-zinc-100 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-300">{{ $openCommentCount }}</span>
+                    @endif
+                </button>
+            </div>
+
+            @if($flyoutTab === 'details')
+            <div class="pt-5 space-y-5">
+
             {{-- The facts, editable in place --}}
-            <div class="grid grid-cols-3 gap-3">
+            <div class="grid grid-cols-2 gap-3">
                 <flux:select variant="listbox" wire:model.live="editCategoryId" label="Category" size="sm">
                     <flux:select.option value="">None</flux:select.option>
                     @foreach($categories as $category)
@@ -1226,20 +1415,22 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                         <div class="flex items-center gap-2"><flux:icon.chevrons-up variant="micro" class="text-red-600 dark:text-red-400" /> Critical</div>
                     </flux:select.option>
                 </flux:select>
-            </div>
 
-            {{-- The capacity number, next to the reality it should match.
-                 Points hang off this quarter's plan, so the field only exists
-                 once a squad gives the plan somewhere to live. --}}
-            @if($openPlan)
-            <div class="flex items-end gap-3">
-                <flux:input type="number" min="0" size="sm" class="w-44"
-                            label="Planned points · {{ $quarterLabel }}"
-                            wire:model.live.debounce.600ms="editPlannedPoints" />
-                <flux:text class="text-sm pb-1.5">{{ $openStaffedPoints }} pts staffed</flux:text>
+                {{-- The capacity number, next to the reality it should match.
+                     Points hang off this quarter's plan, so the field only
+                     exists once a squad gives the plan somewhere to live. --}}
+                @if($openPlan)
+                <flux:field>
+                    <flux:label>Planned · {{ $quarterLabel }}</flux:label>
+                    <div class="flex items-center gap-2.5">
+                        <flux:input type="number" min="0" size="sm" class="w-20"
+                                    wire:model.live.debounce.600ms="editPlannedPoints" />
+                        <flux:text class="text-xs whitespace-nowrap">{{ $openStaffedPoints }} staffed</flux:text>
+                    </div>
+                    <flux:error name="editPlannedPoints" />
+                </flux:field>
+                @endif
             </div>
-            <flux:error name="editPlannedPoints" />
-            @endif
 
             {{-- Why it stopped --}}
             @if($openEpic->openPause)
@@ -1254,28 +1445,6 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 </flux:text>
             </div>
             @endif
-
-            {{-- Status shows where it is and moves it in one control: the lit
-                 chip is the current column, the rest are one click away. --}}
-            <div>
-                <div class="{{ $micro }} mb-2">Status</div>
-                <div class="flex flex-wrap gap-1.5">
-                    @foreach($statuses as $option)
-                    @php $here = $openEpic->status_id === $option->id; @endphp
-                    <button type="button" wire:click="moveEpic({{ $openEpic->id }}, 0, {{ $option->id }})"
-                            @disabled($here)
-                            class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors
-                                   {{ $here
-                                      ? 'border-transparent cursor-default'
-                                      : 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-500' }}"
-                            style="{{ $here ? 'background-color: '.$option->color.'1f; color: '.$option->color : '' }}">
-                        <span class="size-1.5 rounded-full" style="background-color: {{ $option->color }}"></span>
-                        {{ $option->name }}
-                    </button>
-                    @endforeach
-                </div>
-                @error('status')<flux:text class="text-sm text-red-600 dark:text-red-400 mt-2">{{ $message }}</flux:text>@enderror
-            </div>
 
             {{-- People: who is on it. Adding someone books them from this week
                  through the end of the quarter in one click -- fine-grained
@@ -1355,6 +1524,131 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     @endforeach
                 </div>
                 @endif
+            </div>
+            </div>
+            @else
+
+            {{-- Comments: the part of the record that only reads as prose.
+                 One level of threading -- replies sit under their root behind
+                 a left rule, and replying to a reply joins the same thread. --}}
+            <div class="pt-5 space-y-4">
+                @if($openComments->isEmpty())
+                <flux:text class="text-sm">Nothing said yet. Leave the first comment.</flux:text>
+                @endif
+
+                @foreach($openComments as $comment)
+                <div wire:key="comment-{{ $comment->id }}" class="flex gap-2.5">
+                    <flux:avatar circle size="xs" :name="$comment->user->name" :src="$comment->user->profile_photo_url" />
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-baseline gap-2">
+                            <span class="text-[13px] font-medium truncate">{{ $comment->user->name }}</span>
+                            <span class="text-[11px] text-zinc-400 dark:text-zinc-500 shrink-0">{{ $comment->created_at->diffForHumans() }}</span>
+                            <span class="flex-1"></span>
+                            <flux:button size="xs" variant="ghost" wire:click="replyTo({{ $comment->id }})">Reply</flux:button>
+                            @if($comment->user_id === Auth::id())
+                            <flux:button size="xs" variant="ghost" icon="pencil"
+                                         wire:click="editComment({{ $comment->id }})" title="Edit comment" />
+                            <flux:button size="xs" variant="ghost" icon="trash"
+                                         wire:click="deleteComment({{ $comment->id }})"
+                                         wire:confirm="Delete this comment{{ ($openReplies[$comment->id] ?? collect())->isNotEmpty() ? ' and its replies' : '' }}?"
+                                         title="Delete comment" />
+                            @endif
+                        </div>
+
+                        @if($editingCommentId === $comment->id)
+                        <form wire:submit="updateComment" class="mt-1 space-y-2">
+                            <flux:textarea wire:model="editCommentBody" rows="2" />
+                            <flux:error name="editCommentBody" />
+                            <div class="flex justify-end gap-2">
+                                <flux:button type="button" size="xs" variant="ghost" wire:click="cancelEditComment">Cancel</flux:button>
+                                <flux:button type="submit" size="xs" variant="filled">Save</flux:button>
+                            </div>
+                        </form>
+                        @else
+                        <div class="text-sm whitespace-pre-line">{{ $comment->body }}</div>
+                        @endif
+
+                        @foreach($openReplies[$comment->id] ?? [] as $reply)
+                        <div wire:key="comment-{{ $reply->id }}"
+                             class="flex gap-2.5 mt-2 ml-1 pl-3 border-l border-zinc-200 dark:border-zinc-700">
+                            <flux:avatar circle size="xs" :name="$reply->user->name" :src="$reply->user->profile_photo_url" />
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-baseline gap-2">
+                                    <span class="text-[13px] font-medium truncate">{{ $reply->user->name }}</span>
+                                    <span class="text-[11px] text-zinc-400 dark:text-zinc-500 shrink-0">{{ $reply->created_at->diffForHumans() }}</span>
+                                    <span class="flex-1"></span>
+                                    {{-- A reply's Reply button passes its own id; addComment re-roots it. --}}
+                                    <flux:button size="xs" variant="ghost" wire:click="replyTo({{ $reply->id }})">Reply</flux:button>
+                                    @if($reply->user_id === Auth::id())
+                                    <flux:button size="xs" variant="ghost" icon="pencil"
+                                                 wire:click="editComment({{ $reply->id }})" title="Edit reply" />
+                                    <flux:button size="xs" variant="ghost" icon="trash"
+                                                 wire:click="deleteComment({{ $reply->id }})"
+                                                 wire:confirm="Delete this reply?" title="Delete reply" />
+                                    @endif
+                                </div>
+
+                                @if($editingCommentId === $reply->id)
+                                <form wire:submit="updateComment" class="mt-1 space-y-2">
+                                    <flux:textarea wire:model="editCommentBody" rows="2" />
+                                    <flux:error name="editCommentBody" />
+                                    <div class="flex justify-end gap-2">
+                                        <flux:button type="button" size="xs" variant="ghost" wire:click="cancelEditComment">Cancel</flux:button>
+                                        <flux:button type="submit" size="xs" variant="filled">Save</flux:button>
+                                    </div>
+                                </form>
+                                @else
+                                <div class="text-sm whitespace-pre-line">{{ $reply->body }}</div>
+                                @endif
+                            </div>
+                        </div>
+                        @endforeach
+
+                        @if($replyingToId === $comment->id || ($openReplies[$comment->id] ?? collect())->contains('id', $replyingToId))
+                        <form wire:submit="addComment" class="mt-2 ml-1 pl-3 border-l border-zinc-200 dark:border-zinc-700 space-y-2">
+                            <flux:textarea wire:model="commentBody" rows="2" placeholder="Reply…" autofocus />
+                            <flux:error name="commentBody" />
+                            <div class="flex justify-end gap-2">
+                                <flux:button type="button" size="xs" variant="ghost" wire:click="replyTo({{ $replyingToId }})">Cancel</flux:button>
+                                <flux:button type="submit" size="xs" variant="filled">Reply</flux:button>
+                            </div>
+                        </form>
+                        @endif
+                    </div>
+                </div>
+                @endforeach
+
+                @if($replyingToId === null)
+                <form wire:submit="addComment" class="space-y-2">
+                    <flux:textarea wire:model="commentBody" rows="2" placeholder="Leave a comment…" />
+                    <flux:error name="commentBody" />
+                    <div class="flex justify-end">
+                        <flux:button type="submit" size="sm" variant="filled">Comment</flux:button>
+                    </div>
+                </form>
+                @endif
+            </div>
+            @endif
+
+            {{-- Moving is one click, pinned where it always is. The current
+                 column already reads from the badge up top, so the rail only
+                 offers the places the epic can go. --}}
+            <div class="mt-auto pt-6 -mx-6 -mb-6">
+                <div class="sticky bottom-0 border-t border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-6 py-3.5">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        <span class="{{ $micro }} mr-1.5">Move to</span>
+                        @foreach($statuses as $option)
+                        @continue($openEpic->status_id === $option->id)
+                        <button type="button" wire:click="moveEpic({{ $openEpic->id }}, 0, {{ $option->id }})"
+                                class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors
+                                       border-zinc-200 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-500">
+                            <span class="size-1.5 rounded-full" style="background-color: {{ $option->color }}"></span>
+                            {{ $option->name }}
+                        </button>
+                        @endforeach
+                    </div>
+                    @error('status')<flux:text class="text-sm text-red-600 dark:text-red-400 mt-2">{{ $message }}</flux:text>@enderror
+                </div>
             </div>
         </div>
         @endif
