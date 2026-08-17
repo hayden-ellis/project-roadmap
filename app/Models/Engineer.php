@@ -95,7 +95,7 @@ class Engineer extends Model
     public function avatarUrl(): ?string
     {
         if ($this->avatar_path) {
-            return Storage::disk('public')->url($this->avatar_path);
+            return Storage::disk(static::photoDisk())->url($this->avatar_path);
         }
 
         return $this->user?->profile_photo_path
@@ -108,10 +108,10 @@ class Engineer extends Model
     {
         $previous = $this->avatar_path;
 
-        $this->update(['avatar_path' => $photo->store('engineer-avatars', 'public')]);
+        $this->update(['avatar_path' => $photo->store('engineer-avatars', static::photoDisk())]);
 
         if ($previous) {
-            Storage::disk('public')->delete($previous);
+            Storage::disk(static::photoDisk())->delete($previous);
         }
     }
 
@@ -121,9 +121,15 @@ class Engineer extends Model
             return;
         }
 
-        Storage::disk('public')->delete($this->avatar_path);
+        Storage::disk(static::photoDisk())->delete($this->avatar_path);
 
         $this->update(['avatar_path' => null]);
+    }
+
+    /** Same disk as Jetstream's profile photos: local 'public' by default, object storage in prod. */
+    public static function photoDisk(): string
+    {
+        return config('jetstream.profile_photo_disk', 'public');
     }
 
     public function initials(): string

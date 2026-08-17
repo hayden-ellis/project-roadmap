@@ -6,11 +6,13 @@ use App\Models\Epic;
 use App\Models\EpicComment;
 use App\Models\EpicQuarterPlan;
 use App\Models\Status;
+use App\Notifications\EpicCommented;
 use App\Services\CapacityService;
 use App\Support\Quarter;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Notification;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
 use Livewire\Attributes\Validate;
@@ -439,12 +441,19 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             $parentId = $parent->parent_id ?? $parent->id;
         }
 
-        EpicComment::create([
+        $comment = EpicComment::create([
             'epic_id' => $this->epic->id,
             'user_id' => Auth::id(),
             'parent_id' => $parentId,
             'body' => $this->commentBody,
         ]);
+
+        // Everyone already in the conversation hears about it, except the
+        // person who just spoke.
+        Notification::send(
+            $this->epic->participants()->reject(fn ($user) => $user->id === Auth::id()),
+            new EpicCommented($comment),
+        );
 
         $this->commentBody = '';
         $this->replyingToId = null;

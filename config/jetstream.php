@@ -76,6 +76,8 @@ return [
     |
     */
 
-    'profile_photo_disk' => 'public',
+    // 'public' locally; on Laravel Cloud set PROFILE_PHOTO_DISK to the
+    // attached bucket's disk name so photos survive deploys.
+    'profile_photo_disk' => env('PROFILE_PHOTO_DISK', 'public'),
 
 ];

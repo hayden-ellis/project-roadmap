@@ -24,6 +24,27 @@ class User extends Authenticatable
     use TwoFactorAuthenticatable;
 
     /**
+     * Jetstream's version uses storePublicly(), which sets a per-object public
+     * ACL. Cloudflare R2 (Laravel Cloud object storage) rejects per-object
+     * ACLs, so store without one -- visibility is governed by the bucket, and
+     * the local 'public' disk serves everything regardless.
+     */
+    public function updateProfilePhoto(\Illuminate\Http\UploadedFile $photo, $storagePath = 'profile-photos')
+    {
+        tap($this->profile_photo_path, function ($previous) use ($photo, $storagePath) {
+            $this->forceFill([
+                'profile_photo_path' => $photo->store(
+                    $storagePath, ['disk' => $this->profilePhotoDisk()]
+                ),
+            ])->save();
+
+            if ($previous) {
+                \Illuminate\Support\Facades\Storage::disk($this->profilePhotoDisk())->delete($previous);
+            }
+        });
+    }
+
+    /**
      * Get the user's initials derived from their name or email.
      */
     public function initials(): string

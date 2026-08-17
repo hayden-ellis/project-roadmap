@@ -1,59 +1,82 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Project Roadmap
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A quarterly capacity-planning app for engineering teams. It answers three questions the average roadmap deck can't: **what are we building, who is actually staffed on it, and does the math work out?**
 
-## About Laravel
+Epics get planned into quarters, engineers get allocated to epics week by week, and everything else — points, spans, over-allocation warnings, roadmap bars — is *derived* from those allocations rather than typed in. Editing someone's weekly capacity updates every downstream total; there are no stale numbers to chase.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Stack
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+| Layer | Choice |
+|---|---|
+| Framework | Laravel 12 (PHP 8.2+), Jetstream for auth + teams |
+| Frontend | Livewire 4 with single-file page components, Alpine.js |
+| UI kit | [Flux](https://fluxui.dev) **+ Flux Pro** (licensed — see setup below) |
+| Styling | Tailwind CSS v4 via Vite |
+| Database | Postgres in development, in-memory SQLite for tests |
+| Auth extras | Google sign-in via Socialite |
+| Email | Resend |
+| Tests | Pest 4 |
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+Local development is served by [Laravel Herd](https://herd.laravel.com) at `http://projectroadmap.test` — no dev server needed beyond `npm run dev` for Vite.
 
-## Learning Laravel
+## How the domain fits together
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+- **Team** — the Jetstream tenant. Everything below belongs to a team.
+- **Squad** — a group of engineers with a color. Squad rollups are always computed from members, never entered.
+- **Engineer** — a person with a title, optional linked user account (for profile photos), and per-quarter / per-week capacity in points.
+- **Epic** — a unit of work with a priority (critical/high/medium/low), an Eisenhower position (importance × urgency), a category, and a status.
+- **Status** — a team-defined board column. The app reads only two flags from it: `is_complete` (this column means "done") and `requires_reason` (moving here records a pause with a reason). Everything else is just a name and a color.
+- **Allocation** — the atom of planning: one engineer on one epic for one week. Points are *not* stored here; a cell is worth the engineer's capacity that week × share. `CapacityService` derives all totals, spans, and over-allocation flags from these rows.
+- **EpicQuarterPlan** — which quarter(s) and squad(s) an epic is planned into.
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+## Pages
 
-## Laravel Sponsors
+- **Now** — what's in flight this week, what's gone quiet, what's paused and why.
+- **Matrix** — Eisenhower grid (importance × urgency) with drag-and-drop.
+- **Roadmap** — calendar and timeline views; bars reflect real staffing, not wishful dates.
+- **Planning** — the engineer × week allocation grid where staffing actually happens.
+- **Epics / Engineers / Squads / Statuses / Categories** — CRUD plus the derived stats for each.
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+## Getting started
 
-### Premium Partners
+1. **Flux Pro credentials** (required before `composer install` will resolve `livewire/flux-pro`):
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+   ```sh
+   composer config http-basic.composer.fluxui.dev your-email your-flux-license-key
+   ```
 
-## Contributing
+2. **Install and boot:**
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+   ```sh
+   composer run setup   # composer install, .env, key, migrate, npm install + build
+   ```
 
-## Code of Conduct
+   Point `.env` at a local Postgres database first (see `.env.example`), then seed:
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+   ```sh
+   php artisan db:seed
+   ```
 
-## Security Vulnerabilities
+3. **Log in** with a seeded account:
+   - `hre0001@outlook.com` / `password`
+   - `priya@example.com` / `password` (teammate on the same team)
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+4. **Run it.** Under Herd the site is just there at `http://projectroadmap.test`; run `npm run dev` for hot reload. Without Herd, `composer run dev` starts server, queue, logs, and Vite together.
 
-## License
+## Tests
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+```sh
+php artisan test
+```
+
+Pest feature tests against in-memory SQLite. `SmokeTest` renders every page; note that `Allocation.week_start` is deliberately normalized to a bare `Y-m-d` string so date lookups behave identically on SQLite and Postgres.
+
+## Conventions worth knowing
+
+- **Single-file Livewire components.** Pages live in `resources/views/components/` as `⚡name.blade.php` files (yes, the lightning bolt is part of the filename) — PHP class on top, Blade below, routed with `Route::livewire()` in `routes/web.php`.
+- **Derive, don't store.** If a number can be computed from allocations and capacity, it is. Resist adding stored totals.
+- **Statuses are stated, not inferred.** An epic is where somebody moved it. The app flags drift (e.g. "In progress" but unstaffed for 3 weeks) instead of silently "fixing" it.
+- **Drag-and-drop ordering** uses the shared `Sortable` trait + Flux `x-sort` (see `app/Traits/Sortable.php`).
+- **Colors belong to data.** Squads and statuses carry their own hex colors; UI tints derive from them (`{color}1f` backgrounds). Avatars stay neutral zinc on purpose.
+- **UI work is done with Claude Code** using the `frontend-design` skill, prototyping options as artifacts before building the winner into the app. Keep new UI inside the Flux + zinc design system rather than inventing one-off styles.
+- `php artisan pint` before committing PHP.

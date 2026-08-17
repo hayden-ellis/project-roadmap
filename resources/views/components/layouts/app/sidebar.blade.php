@@ -34,6 +34,8 @@
 
         <flux:sidebar.spacer />
 
+        <livewire:notification-bell />
+
         <flux:sidebar.nav>
             <flux:sidebar.item as="button" icon="moon" x-data x-on:click="$flux.dark = ! $flux.dark">
                 {{ __('Dark Mode') }}
@@ -91,6 +93,7 @@
     <flux:header class="lg:hidden">
         <flux:sidebar.toggle class="lg:hidden" icon="bars-2" inset="left" />
         <flux:spacer />
+        <livewire:notification-bell variant="header" />
         <flux:dropdown position="top" alignt="start">
             <flux:profile :avatar="auth()->user()->profile_photo_path ? auth()->user()->profile_photo_url : null" :initials="auth()->user()->initials()" />
             <flux:menu>

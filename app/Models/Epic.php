@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Notifications\EpicStatusChanged;
 use App\Support\Quarter;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Notification;
 
 class Epic extends Model
 {
@@ -57,6 +60,40 @@ class Epic extends Model
                     ->max('matrix_order')) + 1;
             }
         });
+
+        // Every path that files an epic somewhere else -- a board drag, the
+        // edit page, a pause or complete action -- lands here, so the people
+        // in its conversation hear about the move exactly once.
+        static::updated(function (Epic $epic) {
+            if (! $epic->wasChanged('status_id')) {
+                return;
+            }
+
+            $actor = Auth::user();
+
+            $recipients = $epic->participants()
+                ->reject(fn ($user) => $user->id === $actor?->id);
+
+            if ($recipients->isEmpty()) {
+                return;
+            }
+
+            Notification::send($recipients, new EpicStatusChanged(
+                $epic,
+                Status::find($epic->getOriginal('status_id'))?->name,
+                Status::find($epic->status_id)?->name,
+                $actor?->name ?? 'Someone',
+            ));
+        });
+    }
+
+    /**
+     * Users in this epic's conversation. Commenting is how somebody opts
+     * into hearing about an epic -- there is no separate watcher list.
+     */
+    public function participants()
+    {
+        return User::whereIn('id', $this->comments()->select('user_id'))->get();
     }
 
     /** Board order within a column. */
