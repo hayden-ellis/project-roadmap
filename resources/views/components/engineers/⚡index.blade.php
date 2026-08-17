@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Allocation;
 use App\Services\CapacityService;
 use App\Support\Quarter;
 use Illuminate\Support\Facades\Auth;
@@ -15,9 +16,18 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     #[Url]
     public bool $showInactive = false;
 
+    #[Url]
+    public array $statusIds = [];
+
     public function mount(): void
     {
         $this->quarter = $this->quarter ?: Quarter::current()->key();
+
+        // Fresh visits start with completed work filtered out; an explicit
+        // selection (including clearing to "all") travels in the URL.
+        $this->statusIds = $this->statusIds ?: Auth::user()->currentTeam
+            ->statuses()->where('is_complete', false)
+            ->pluck('id')->map(fn ($id) => (string) $id)->all();
     }
 
     public function with(): array
@@ -31,8 +41,26 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             ->with('squad')
             ->when(! $this->showInactive, fn ($q) => $q->active())
             ->ordered()
+            ->get();
+
+        // One query for every engineer's bookings this quarter, grouped per
+        // epic so each row can list what its engineer is actually on.
+        $allocations = Allocation::whereIn('engineer_id', $engineers->pluck('id'))
+            ->whereIn('week_start', collect($capacity->calendar()->weeksIn($quarter))->map->toDateString())
+            ->with('epic.status')
             ->get()
-            ->map(function ($engineer) use ($capacity, $quarter, $week) {
+            ->groupBy('engineer_id');
+
+        $engineers = $engineers
+            ->map(function ($engineer) use ($capacity, $quarter, $week, $allocations) {
+                $engineer->epics = ($allocations[$engineer->id] ?? collect())
+                    ->filter(fn ($a) => $a->epic)
+                    ->when(! empty($this->statusIds), fn ($c) => $c->filter(fn ($a) => in_array((string) $a->epic->status_id, $this->statusIds, true)))
+                    ->groupBy('epic_id')
+                    ->map(fn ($rows) => $rows->first()->epic)
+                    ->sortBy(fn ($epic) => ['critical' => 0, 'high' => 1, 'medium' => 2, 'low' => 3][$epic->priority] ?? 4)
+                    ->values();
+
                 $engineer->stats = [
                     'capacity' => $capacity->quarterCapacity($engineer, $quarter),
                     'planned' => $capacity->plannedQuarterCapacity($engineer, $quarter),
@@ -48,15 +76,9 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
         return [
             'engineers' => $engineers,
+            'statuses' => $team->statuses()->ordered()->get(),
             'quarters' => Quarter::current()->previous()->through(8),
             'quarterLabel' => $quarter->label(),
-            'squadTotals' => $engineers->groupBy(fn ($e) => $e->squad?->name ?? 'No squad')
-                ->map(fn ($group) => [
-                    'squad' => $group->first()->squad,
-                    'capacity' => $group->sum(fn ($e) => $e->stats['capacity']),
-                    'allocated' => $group->sum(fn ($e) => $e->stats['allocated']),
-                    'count' => $group->count(),
-                ]),
         ];
     }
 };
@@ -78,39 +100,15 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         </div>
     </div>
 
-    {{-- Squad rollups: derived, never typed in --}}
-    @if($squadTotals->isNotEmpty())
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
-        @foreach($squadTotals as $name => $total)
-        @php $over = $total['allocated'] > $total['capacity']; @endphp
-        <flux:card class="py-3 px-4">
-            <div class="flex items-center gap-2 mb-2">
-                @if($total['squad'])
-                <div class="h-2.5 w-2.5 rounded-full" style="background-color: {{ $total['squad']->color }}"></div>
-                @endif
-                <flux:text class="font-medium">{{ $name }}</flux:text>
-                <flux:text class="text-xs">{{ $total['count'] }} {{ Str::plural('engineer', $total['count']) }}</flux:text>
-            </div>
-            <div class="flex items-baseline gap-2">
-                <span class="text-xl font-semibold {{ $over ? 'text-red-600 dark:text-red-400' : '' }}">
-                    {{ $total['allocated'] }}
-                </span>
-                <flux:text class="text-sm">/ {{ $total['capacity'] }} pts</flux:text>
-                @if($over)
-                <flux:badge color="red" size="sm">Over</flux:badge>
-                @endif
-            </div>
-            <div class="mt-2 h-1.5 rounded-full bg-zinc-200 dark:bg-zinc-700 overflow-hidden">
-                <div class="h-full rounded-full {{ $over ? 'bg-red-500' : 'bg-emerald-500' }}"
-                     style="width: {{ $total['capacity'] > 0 ? min(100, ($total['allocated'] / $total['capacity']) * 100) : 0 }}%"></div>
-            </div>
-        </flux:card>
-        @endforeach
-    </div>
-    @endif
-
-    <div class="flex items-center gap-2 mb-4">
-        <flux:switch wire:model.live="showInactive" label="Show inactive" />
+    <div class="flex items-center gap-6 mb-4">
+        <div class="w-56 shrink-0">
+            <flux:select multiple variant="listbox" wire:model.live="statusIds" placeholder="All statuses">
+                @foreach($statuses as $status)
+                <flux:select.option value="{{ $status->id }}">{{ $status->name }}</flux:select.option>
+                @endforeach
+            </flux:select>
+        </div>
+        <flux:switch wire:model.live="showInactive" label="Show inactive" class="whitespace-nowrap" />
     </div>
 
     @if($engineers->isEmpty())
@@ -135,12 +133,32 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     <th class="px-4 py-3 font-medium">This week</th>
                 </tr>
             </thead>
-            <tbody class="divide-y divide-zinc-200 dark:divide-zinc-700">
+            <tbody x-data="{ collapsed: {} }">
                 @foreach($engineers as $engineer)
-                <tr class="hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer"
+                {{-- An engineer and their epics render as two <tr>s but must read as
+                     one unit: the border sits only between engineers, and hovering
+                     either row tints both. --}}
+                <tr class="{{ $loop->first ? '' : 'border-t border-zinc-200 dark:border-zinc-700' }} cursor-pointer
+                           hover:bg-zinc-50 dark:hover:bg-zinc-800/50
+                           @if($engineer->epics->isNotEmpty())
+                           [&:hover+tr]:bg-zinc-50 dark:[&:hover+tr]:bg-zinc-800/50
+                           has-[+tr:hover]:bg-zinc-50 dark:has-[+tr:hover]:bg-zinc-800/50
+                           @endif"
                     onclick="window.location='/engineers/{{ $engineer->id }}/edit'">
                     <td class="px-4 py-3">
                         <div class="flex items-center gap-3">
+                            @if($engineer->epics->isNotEmpty())
+                            <button type="button"
+                                    class="shrink-0 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+                                    @click.stop="collapsed[{{ $engineer->id }}] = !collapsed[{{ $engineer->id }}]"
+                                    :aria-expanded="!collapsed[{{ $engineer->id }}]"
+                                    aria-label="Toggle epics for {{ $engineer->name }}">
+                                <flux:icon.chevron-down class="size-4 transition-transform"
+                                                        ::class="collapsed[{{ $engineer->id }}] && '-rotate-90'" />
+                            </button>
+                            @else
+                            <span class="w-4 shrink-0"></span>
+                            @endif
                             <x-engineer-avatar :engineer="$engineer" size="sm" :tooltip="false" />
                             <div class="min-w-0">
                                 <div class="font-medium truncate flex items-center gap-2">
@@ -190,6 +208,27 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                         </div>
                     </td>
                 </tr>
+                @if($engineer->epics->isNotEmpty())
+                <tr x-show="!collapsed[{{ $engineer->id }}]" class="hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+                    <td colspan="6" class="px-4 pb-3.5 pt-0">
+                        {{-- ml lines the lane up under the avatar: chevron (16) + gap (12). --}}
+                        <div class="ml-7 flex flex-wrap gap-2 rounded-lg bg-zinc-100/70 dark:bg-zinc-800/60 px-3 py-2.5">
+                            @foreach($engineer->epics as $epic)
+                            <a href="/epics/{{ $epic->id }}/edit" wire:navigate
+                               class="inline-flex items-center gap-2.5 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 py-1.5 pl-2.5 pr-3 hover:border-zinc-300 dark:hover:border-zinc-600">
+                                <span class="w-[3px] self-stretch rounded-full shrink-0"
+                                      style="background-color: {{ $epic->status?->color ?? '#a1a1aa' }}"></span>
+                                <span class="min-w-0">
+                                    <span class="block text-xs font-medium text-zinc-800 dark:text-zinc-100 truncate max-w-[16rem]">{{ $epic->title }}</span>
+                                    <span class="block text-[11px] text-zinc-500 dark:text-zinc-400 leading-tight">{{ $epic->status?->name ?? 'No status' }}</span>
+                                </span>
+                                <x-priority-icon :priority="$epic->priority" />
+                            </a>
+                            @endforeach
+                        </div>
+                    </td>
+                </tr>
+                @endif
                 @endforeach
             </tbody>
         </table>

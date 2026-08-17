@@ -3,6 +3,7 @@
 use App\Models\Epic;
 use App\Models\EpicQuarterPlan;
 use App\Models\Squad;
+use App\Models\Status;
 use App\Models\User;
 use Livewire\Livewire;
 
@@ -119,6 +120,29 @@ it('filters the matrix to the selected squads', function () {
     expect(quadrant($component, 'high/urgent')->pluck('id'))
         ->toContain($ours->id)
         ->not->toContain($theirs->id);
+});
+
+it('filters the matrix to the selected statuses', function () {
+    $planned = Status::create(['team_id' => $this->team->id, 'name' => 'Planned', 'color' => '#3B82F6']);
+    $active = Status::create(['team_id' => $this->team->id, 'name' => 'Active', 'color' => '#22C55E']);
+
+    $ours = ($this->makeEpic)('Ours', 'critical', ['status_id' => $planned->id]);
+    $theirs = ($this->makeEpic)('Theirs', 'critical', ['status_id' => $active->id]);
+
+    $component = Livewire::test('matrix')->set('selectedStatusIds', [$planned->id]);
+
+    expect(quadrant($component, 'high/urgent')->pluck('id'))
+        ->toContain($ours->id)
+        ->not->toContain($theirs->id);
+});
+
+it('offers only unfinished statuses as filter options', function () {
+    $active = Status::create(['team_id' => $this->team->id, 'name' => 'Active', 'color' => '#22C55E']);
+    $done = Status::create(['team_id' => $this->team->id, 'name' => 'Done', 'color' => '#A1A1AA', 'is_complete' => true]);
+
+    $options = Livewire::test('matrix')->viewData('statuses')->pluck('id');
+
+    expect($options)->toContain($active->id)->not->toContain($done->id);
 });
 
 it('filters the matrix to the selected quarter', function () {

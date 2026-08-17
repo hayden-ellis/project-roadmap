@@ -26,6 +26,9 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     #[Url]
     public array $selectedSquadIds = [];
 
+    #[Url]
+    public array $selectedStatusIds = [];
+
     /** Quarter key like "2026-Q3", or '' for everything. */
     #[Url]
     public string $selectedQuarter = '';
@@ -37,6 +40,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     public function clearFilters(): void
     {
         $this->selectedSquadIds = [];
+        $this->selectedStatusIds = [];
         $this->selectedQuarter = '';
     }
 
@@ -137,6 +141,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             $query->whereHas('quarterPlans', fn ($q) => $q->whereIn('squad_id', $this->selectedSquadIds));
         }
 
+        if (! empty($this->selectedStatusIds)) {
+            $query->whereIn('status_id', $this->selectedStatusIds);
+        }
+
         if ($quarter = $this->quarterFilter()) {
             $query->forQuarter($quarter);
         }
@@ -186,6 +194,9 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         return [
             'byQuadrant' => $epics->groupBy(fn ($epic) => $epic->quadrant()),
             'squads' => $team->squads()->orderBy('name')->get(),
+            // The matrix only shows unfinished epics, so complete statuses
+            // could never match anything and stay out of the list.
+            'statuses' => $team->statuses()->where('is_complete', false)->ordered()->get(),
             'quarterOptions' => $quarterOptions,
         ];
     }
@@ -216,6 +227,12 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             @endforeach
         </flux:select>
 
+        <flux:select multiple variant="listbox" wire:model.live="selectedStatusIds" placeholder="All Statuses" class="w-full lg:w-56">
+            @foreach($statuses as $status)
+            <flux:select.option value="{{ $status->id }}">{{ $status->name }}</flux:select.option>
+            @endforeach
+        </flux:select>
+
         <flux:select variant="listbox" wire:model.live="selectedQuarter" class="w-full lg:w-44">
             <flux:select.option value="">All Quarters</flux:select.option>
             @foreach($quarterOptions as $option)
@@ -223,7 +240,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             @endforeach
         </flux:select>
 
-        @if(! empty($selectedSquadIds) || $selectedQuarter !== '')
+        @if(! empty($selectedSquadIds) || ! empty($selectedStatusIds) || $selectedQuarter !== '')
         <flux:button variant="ghost" size="sm" wire:click="clearFilters" icon="x-mark" class="w-full lg:w-auto">Clear</flux:button>
         @endif
     </div>
