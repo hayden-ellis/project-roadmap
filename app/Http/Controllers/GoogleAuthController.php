@@ -54,8 +54,8 @@ class GoogleAuthController extends Controller
             Auth::login($newUser);
         }
 
-        // Redirect the user to the roadmap or dashboard
-        return redirect()->route('roadmap');
+        // Redirect the user to the /now page
+        return redirect()->route('now');
     }
 
     /**
