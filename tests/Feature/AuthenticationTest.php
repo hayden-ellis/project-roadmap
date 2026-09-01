@@ -17,7 +17,7 @@ test('users can authenticate using the login screen', function () {
     ]);
 
     $this->assertAuthenticated();
-    $response->assertRedirect(route('roadmap', absolute: false));
+    $response->assertRedirect(route('now', absolute: false));
 });
 
 test('users cannot authenticate with invalid password', function () {
