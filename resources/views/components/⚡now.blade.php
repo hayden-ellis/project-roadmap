@@ -147,6 +147,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
     public ?int $editPlannedPoints = null;
 
+    public string $editJiraEpicUrl = '';
+
+    public string $editJpdIdeaUrl = '';
+
     // ------------------------------------------------------------- the flyout
 
     public function open(int $epicId): void
@@ -300,6 +304,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->editPriority = $epic->priority ?? 'medium';
         $this->editDescription = (string) ($epic->description ?? '');
         $this->editPlannedPoints = $plan?->planned_points;
+        $this->editJiraEpicUrl = $epic->jira_epic_url ?? '';
+        $this->editJpdIdeaUrl = $epic->jpd_idea_url ?? '';
     }
 
     public function updatedEditDescription(): void
@@ -356,6 +362,32 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->validate(['editPriority' => 'required|in:low,medium,high,critical']);
 
         $epic->update(['priority' => $this->editPriority]);
+    }
+
+    public function updatedEditJiraEpicUrl(): void
+    {
+        $epic = $this->teamEpic($this->openEpicId);
+        $this->authorize('update', $epic);
+
+        $this->validate(
+            ['editJiraEpicUrl' => 'nullable|url:https|max:2048'],
+            ['editJiraEpicUrl.url' => 'Paste the full https:// link from Jira.'],
+        );
+
+        $epic->update(['jira_epic_url' => trim($this->editJiraEpicUrl) ?: null]);
+    }
+
+    public function updatedEditJpdIdeaUrl(): void
+    {
+        $epic = $this->teamEpic($this->openEpicId);
+        $this->authorize('update', $epic);
+
+        $this->validate(
+            ['editJpdIdeaUrl' => 'nullable|url:https|max:2048'],
+            ['editJpdIdeaUrl.url' => 'Paste the full https:// link from Product Discovery.'],
+        );
+
+        $epic->update(['jpd_idea_url' => trim($this->editJpdIdeaUrl) ?: null]);
     }
 
     /**
@@ -1161,6 +1193,15 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                             @endif
 
                             <x-priority-icon :priority="$epic->priority" />
+
+                            {{-- click.stop inside the chip keeps a jump to
+                                 Jira from also opening the flyout. --}}
+                            @if($epic->jira_epic_url)
+                            <x-atlassian-link :url="$epic->jira_epic_url" kind="jira" />
+                            @endif
+                            @if($epic->jpd_idea_url)
+                            <x-atlassian-link :url="$epic->jpd_idea_url" kind="idea" />
+                            @endif
                         </div>
 
                         {{-- Who is actually on it this week -- the one fact a
@@ -1337,7 +1378,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     @endif
                     <span class="flex-1"></span>
                     <span class="text-[11px] font-medium text-zinc-400 shrink-0" wire:loading.delay
-                          wire:target="editTitle, editCategoryId, editSquadId, editPriority, editDescription, editPlannedPoints">Saving…</span>
+                          wire:target="editTitle, editCategoryId, editSquadId, editPriority, editDescription, editPlannedPoints, editJiraEpicUrl, editJpdIdeaUrl">Saving…</span>
                     <flux:button size="xs" variant="ghost" icon="arrow-top-right-on-square"
                                  href="/epics/{{ $openEpic->id }}/edit" wire:navigate>Full view</flux:button>
                 </div>
@@ -1430,6 +1471,32 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     <flux:error name="editPlannedPoints" />
                 </flux:field>
                 @endif
+            </div>
+
+            {{-- Where it lives in Atlassian. Paste the link and it saves like
+                 every other field; the chip is the way out to the issue. --}}
+            <div class="space-y-2">
+                <div class="{{ $micro }}">Links</div>
+
+                <div class="flex items-center gap-2">
+                    <span class="w-16 shrink-0 text-xs text-zinc-500 dark:text-zinc-400">Jira epic</span>
+                    <flux:input type="url" size="sm" class="flex-1" placeholder="https://…/browse/KEY-1"
+                                wire:model.live.debounce.600ms="editJiraEpicUrl" />
+                    @if($openEpic->jira_epic_url)
+                    <x-atlassian-link :url="$openEpic->jira_epic_url" kind="jira" />
+                    @endif
+                </div>
+                <flux:error name="editJiraEpicUrl" />
+
+                <div class="flex items-center gap-2">
+                    <span class="w-16 shrink-0 text-xs text-zinc-500 dark:text-zinc-400">JPD idea</span>
+                    <flux:input type="url" size="sm" class="flex-1" placeholder="https://…?selectedIssue=KEY-1"
+                                wire:model.live.debounce.600ms="editJpdIdeaUrl" />
+                    @if($openEpic->jpd_idea_url)
+                    <x-atlassian-link :url="$openEpic->jpd_idea_url" kind="idea" />
+                    @endif
+                </div>
+                <flux:error name="editJpdIdeaUrl" />
             </div>
 
             {{-- Why it stopped --}}

@@ -188,6 +188,16 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                         @if($epic->is_recurring)
                         <flux:badge color="purple" size="sm" icon="arrow-path">Recurring</flux:badge>
                         @endif
+
+                        {{-- The whole card is already a link, so these chips
+                             only display the key; opening happens from the
+                             edit page or the board. --}}
+                        @if($epic->jira_epic_url)
+                        <x-atlassian-link :url="$epic->jira_epic_url" kind="jira" :interactive="false" />
+                        @endif
+                        @if($epic->jpd_idea_url)
+                        <x-atlassian-link :url="$epic->jpd_idea_url" kind="idea" :interactive="false" />
+                        @endif
                     </div>
 
                     <div class="flex flex-wrap items-center gap-3 text-sm text-zinc-500 dark:text-zinc-400">

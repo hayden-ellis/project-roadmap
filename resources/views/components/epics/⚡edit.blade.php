@@ -32,7 +32,7 @@ use Livewire\Component;
 new #[Layout('components.layouts.app.sidebar')] class extends Component
 {
     /** Fields with a validation rule attached; is_recurring has none. */
-    private const VALIDATED = ['title', 'description', 'status_id', 'category_id', 'priority', 'start_date', 'end_date'];
+    private const VALIDATED = ['title', 'description', 'status_id', 'category_id', 'priority', 'start_date', 'end_date', 'jira_epic_url', 'jpd_idea_url'];
 
     public Epic $epic;
 
@@ -58,6 +58,12 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
     #[Validate('nullable|date|after_or_equal:start_date')]
     public string $end_date = '';
+
+    #[Validate('nullable|url:https|max:2048', message: 'Paste the full https:// link from Jira.')]
+    public string $jira_epic_url = '';
+
+    #[Validate('nullable|url:https|max:2048', message: 'Paste the full https:// link from Product Discovery.')]
+    public string $jpd_idea_url = '';
 
     /** Scopes the spine and the squad plan. Everything else is quarter-agnostic. */
     #[Url]
@@ -98,6 +104,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->is_recurring = (bool) $epic->is_recurring;
         $this->start_date = $epic->start_date?->format('Y-m-d') ?? '';
         $this->end_date = $epic->end_date?->format('Y-m-d') ?? '';
+        $this->jira_epic_url = $epic->jira_epic_url ?? '';
+        $this->jpd_idea_url = $epic->jpd_idea_url ?? '';
 
         $this->quarter = $this->quarter ?: $this->openingQuarter()->key();
 
@@ -171,6 +179,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             'start_date' => fn () => $this->start_date ?: null,
             'end_date' => fn () => $this->end_date ?: null,
             'is_recurring' => fn () => $this->is_recurring,
+            'jira_epic_url' => fn () => trim($this->jira_epic_url) ?: null,
+            'jpd_idea_url' => fn () => trim($this->jpd_idea_url) ?: null,
         ];
 
         if (! isset($columns[$property])) {
@@ -1076,6 +1086,32 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 @error('end_date')
                 <div class="px-5 py-2.5"><flux:error name="end_date" /></div>
                 @enderror
+
+                {{-- Pasted pointers into Atlassian, nothing synced. The chip
+                     next to a saved link is the one-click way out. --}}
+                <div class="px-5 py-3">
+                    <div class="flex items-center gap-3">
+                        <label for="epic-jira" class="w-20 shrink-0 text-[13px] text-zinc-500 dark:text-zinc-400">Jira epic</label>
+                        <flux:input id="epic-jira" type="url" size="sm" class="flex-1 min-w-0"
+                                    placeholder="Paste Jira link" wire:model.live.debounce.600ms="jira_epic_url" />
+                        @if($epic->jira_epic_url)
+                        <x-atlassian-link :url="$epic->jira_epic_url" kind="jira" />
+                        @endif
+                    </div>
+                    <flux:error name="jira_epic_url" />
+                </div>
+
+                <div class="px-5 py-3">
+                    <div class="flex items-center gap-3">
+                        <label for="epic-jpd" class="w-20 shrink-0 text-[13px] text-zinc-500 dark:text-zinc-400">JPD idea</label>
+                        <flux:input id="epic-jpd" type="url" size="sm" class="flex-1 min-w-0"
+                                    placeholder="Paste idea link" wire:model.live.debounce.600ms="jpd_idea_url" />
+                        @if($epic->jpd_idea_url)
+                        <x-atlassian-link :url="$epic->jpd_idea_url" kind="idea" />
+                        @endif
+                    </div>
+                    <flux:error name="jpd_idea_url" />
+                </div>
 
                 <div class="px-5 py-3.5 flex items-center justify-between gap-3">
                     <span class="min-w-0">

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Notifications\EpicStatusChanged;
+use App\Support\AtlassianLink;
 use App\Support\Quarter;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -30,6 +31,8 @@ class Epic extends Model
         'start_date',
         'end_date',
         'is_recurring',
+        'jira_epic_url',
+        'jpd_idea_url',
     ];
 
     protected function casts(): array
@@ -112,6 +115,18 @@ class Epic extends Model
     public function quadrant(): string
     {
         return "{$this->importance}/{$this->urgency}";
+    }
+
+    /** Issue key of the linked Jira epic, when one can be read off the URL. */
+    public function jiraEpicKey(): ?string
+    {
+        return AtlassianLink::issueKey($this->jira_epic_url);
+    }
+
+    /** Issue key of the linked Product Discovery idea, likewise. */
+    public function jpdIdeaKey(): ?string
+    {
+        return AtlassianLink::issueKey($this->jpd_idea_url);
     }
 
     public function team(): BelongsTo
