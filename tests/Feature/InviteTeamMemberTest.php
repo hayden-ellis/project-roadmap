@@ -46,3 +46,52 @@ test('team member invitations can be cancelled', function () {
 })->skip(function () {
     return ! Features::sendsTeamInvitations();
 }, 'Team invitations not enabled.');
+
+test('team admins can invite team members', function () {
+    Mail::fake();
+
+    $owner = User::factory()->withPersonalTeam()->create();
+    $team = $owner->currentTeam;
+
+    $admin = User::factory()->create();
+    $team->users()->attach($admin, ['role' => 'admin']);
+
+    $this->actingAs($admin);
+
+    Livewire::test(TeamMemberManager::class, ['team' => $team])
+        ->set('addTeamMemberForm', [
+            'email' => 'invited@example.com',
+            'role' => 'editor',
+        ])->call('addTeamMember');
+
+    Mail::assertSent(TeamInvitation::class);
+
+    expect($team->fresh()->teamInvitations)->toHaveCount(1);
+})->skip(function () {
+    return ! Features::sendsTeamInvitations();
+}, 'Team invitations not enabled.');
+
+test('team editors cannot invite team members', function () {
+    Mail::fake();
+
+    $owner = User::factory()->withPersonalTeam()->create();
+    $team = $owner->currentTeam;
+
+    $editor = User::factory()->create();
+    $team->users()->attach($editor, ['role' => 'editor']);
+
+    $this->actingAs($editor);
+
+    Livewire::test(TeamMemberManager::class, ['team' => $team])
+        ->set('addTeamMemberForm', [
+            'email' => 'invited@example.com',
+            'role' => 'editor',
+        ])->call('addTeamMember')
+        ->assertForbidden();
+
+    Mail::assertNothingSent();
+
+    expect($team->fresh()->teamInvitations)->toHaveCount(0);
+})->skip(function () {
+    return ! Features::sendsTeamInvitations();
+}, 'Team invitations not enabled.');

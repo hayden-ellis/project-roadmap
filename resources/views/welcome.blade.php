@@ -27,10 +27,10 @@
                         <nav class="flex items-center gap-4">
                             @auth
                                 <a
-                                    href="{{ url('/roadmap') }}"
+                                    href="{{ route('now') }}"
                                     class="inline-flex items-center px-4 py-2 bg-cyan-500 dark:bg-cyan-500 text-white dark:text-white rounded-lg hover:bg-cyan-600 dark:hover:bg-cyan-400 transition-colors font-medium text-sm"
                                 >
-                                    Go to Roadmap
+                                    Open App
                                 </a>
                             @else
                                 <a
@@ -68,10 +68,10 @@
                     <div class="mt-10 flex items-center justify-center gap-4 flex-wrap">
                         @auth
                             <a
-                                href="{{ url('/roadmap') }}"
+                                href="{{ route('now') }}"
                                 class="inline-flex items-center px-6 py-3 bg-cyan-500 dark:bg-cyan-500 text-white dark:text-white rounded-lg hover:bg-cyan-600 dark:hover:bg-cyan-400 transition-colors font-semibold text-base shadow-lg"
                             >
-                                View Your Roadmap
+                                Go to Your Dashboard
                             </a>
                         @else
                             <a

@@ -44,10 +44,12 @@ class TeamPolicy
 
     /**
      * Determine whether the user can add team members.
+     *
+     * Owners and team admins may invite people; editors may not.
      */
     public function addTeamMember(User $user, Team $team): bool
     {
-        return $user->ownsTeam($team);
+        return $user->ownsTeam($team) || $user->hasTeamRole($team, 'admin');
     }
 
     /**
