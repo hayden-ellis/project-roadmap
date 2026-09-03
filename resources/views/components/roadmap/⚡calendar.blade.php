@@ -1,6 +1,7 @@
 <?php
 
 use App\Services\CapacityService;
+use App\Support\DefaultSquad;
 use App\Support\Quarter;
 use Carbon\CarbonImmutable;
 use Livewire\Attributes\Layout;
@@ -30,6 +31,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     public function mount(): void
     {
         $this->quarter = $this->quarter ?: Quarter::current()->key();
+        $this->selected_squads = DefaultSquad::seed($this->selected_squads, 'selected_squads', auth()->user(), auth()->user()->currentTeam);
     }
 
     public function with(): array
@@ -118,6 +120,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             <span class="text-sm">{{ $squad->name }}</span>
         </label>
         @endforeach
+
+        <livewire:default-squad :selected="count($selected_squads) === 1 ? (int) $selected_squads[0] : null" />
     </div>
 
     @if($epics->isEmpty())

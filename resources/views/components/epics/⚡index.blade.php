@@ -3,6 +3,7 @@
 use App\Models\Allocation;
 use App\Models\Epic;
 use App\Services\CapacityService;
+use App\Support\DefaultSquad;
 use App\Support\Quarter;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
@@ -26,6 +27,11 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
     #[Url]
     public string $sortDirection = 'desc';
+
+    public function mount(): void
+    {
+        $this->selectedSquadIds = DefaultSquad::seed($this->selectedSquadIds, 'selectedSquadIds', Auth::user(), Auth::user()->currentTeam);
+    }
 
     public function clearFilters(): void
     {
@@ -211,6 +217,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         @if($hasFilters)
         <flux:button variant="ghost" size="sm" wire:click="clearFilters" icon="x-mark" class="w-full lg:w-auto">Clear</flux:button>
         @endif
+
+        <livewire:default-squad :selected="count($selectedSquadIds) === 1 ? (int) $selectedSquadIds[0] : null" />
 
         <flux:text class="lg:ml-auto text-sm whitespace-nowrap">{{ $epics->count() }} {{ Str::plural('epic', $epics->count()) }}</flux:text>
     </div>

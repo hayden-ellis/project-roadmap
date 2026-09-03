@@ -3,6 +3,7 @@
 use App\Models\Epic;
 use App\Models\EpicQuarterPlan;
 use App\Models\Status;
+use App\Support\DefaultSquad;
 use App\Support\Quarter;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -36,6 +37,11 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     public string $newTitle = '';
 
     public string $newPriority = 'medium';
+
+    public function mount(): void
+    {
+        $this->selectedSquadIds = DefaultSquad::seed($this->selectedSquadIds, 'selectedSquadIds', Auth::user(), Auth::user()->currentTeam);
+    }
 
     public function clearFilters(): void
     {
@@ -243,6 +249,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         @if(! empty($selectedSquadIds) || ! empty($selectedStatusIds) || $selectedQuarter !== '')
         <flux:button variant="ghost" size="sm" wire:click="clearFilters" icon="x-mark" class="w-full lg:w-auto">Clear</flux:button>
         @endif
+
+        <livewire:default-squad :selected="count($selectedSquadIds) === 1 ? (int) $selectedSquadIds[0] : null" />
     </div>
 
     {{-- Capture it now; it lands where its priority implies and gets dragged

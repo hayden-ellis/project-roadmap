@@ -7,6 +7,7 @@ use App\Models\EpicPause;
 use App\Models\EpicQuarterPlan;
 use App\Models\Status;
 use App\Services\CapacityService;
+use App\Support\DefaultSquad;
 use App\Support\Quarter;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -53,6 +54,15 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
      */
     #[Session(key: 'now.squad')]
     public string $squadFilter = '';
+
+    public function mount(): void
+    {
+        // A fresh session opens on the user's default squad. Any choice made
+        // since -- including "all squads" -- is in the session and wins.
+        if (! session()->exists('now.squad')) {
+            $this->squadFilter = (string) (DefaultSquad::id(Auth::user(), Auth::user()->currentTeam) ?? '');
+        }
+    }
 
     /**
      * Columns the user has hidden to focus, as status ids. Remembered per
@@ -966,6 +976,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             <flux:text class="mt-1">Week of {{ $weekLabel }} · {{ $quarterLabel }}</flux:text>
         </div>
         <div class="flex items-center gap-2">
+            <livewire:default-squad :selected="ctype_digit($squadFilter) ? (int) $squadFilter : null" />
+
             {{-- Everything that narrows the board lives behind one control:
                  which squad's cards, and which columns get drawn. The badge
                  says how much of the board you are not seeing. --}}

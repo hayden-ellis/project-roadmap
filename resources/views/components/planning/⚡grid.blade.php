@@ -3,6 +3,7 @@
 use App\Models\Allocation;
 use App\Models\Epic;
 use App\Services\CapacityService;
+use App\Support\DefaultSquad;
 use App\Support\Quarter;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -33,6 +34,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     public function mount(): void
     {
         $this->quarter = $this->quarter ?: Quarter::current()->key();
+        $this->squadIds = DefaultSquad::seed($this->squadIds, 'squadIds', Auth::user(), Auth::user()->currentTeam);
     }
 
     public function setBrush(?int $epicId): void
@@ -208,6 +210,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 <flux:select.option value="{{ $squad->id }}">{{ $squad->name }}</flux:select.option>
                 @endforeach
             </flux:select>
+
+            <livewire:default-squad :selected="count($squadIds) === 1 ? (int) $squadIds[0] : null" />
         </div>
     </div>
 

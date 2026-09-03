@@ -2,6 +2,7 @@
 
 use App\Models\Allocation;
 use App\Services\CapacityService;
+use App\Support\DefaultSquad;
 use App\Support\Quarter;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
@@ -19,9 +20,13 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     #[Url]
     public array $statusIds = [];
 
+    #[Url]
+    public array $squadIds = [];
+
     public function mount(): void
     {
         $this->quarter = $this->quarter ?: Quarter::current()->key();
+        $this->squadIds = DefaultSquad::seed($this->squadIds, 'squadIds', Auth::user(), Auth::user()->currentTeam);
 
         // Fresh visits start with completed work filtered out; an explicit
         // selection (including clearing to "all") travels in the URL.
@@ -40,6 +45,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $engineers = $team->engineers()
             ->with('squad')
             ->when(! $this->showInactive, fn ($q) => $q->active())
+            ->when(! empty($this->squadIds), fn ($q) => $q->whereIn('squad_id', $this->squadIds))
             ->ordered()
             ->get();
 
@@ -76,6 +82,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
         return [
             'engineers' => $engineers,
+            'squads' => $team->squads()->orderBy('name')->get(),
             'statuses' => $team->statuses()->ordered()->get(),
             'quarters' => Quarter::current()->previous()->through(8),
             'quarterLabel' => $quarter->label(),
@@ -100,7 +107,14 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         </div>
     </div>
 
-    <div class="flex items-center gap-6 mb-4">
+    <div class="flex flex-wrap items-center gap-x-6 gap-y-3 mb-4">
+        <div class="w-56 shrink-0">
+            <flux:select multiple variant="listbox" wire:model.live="squadIds" placeholder="All squads">
+                @foreach($squads as $squad)
+                <flux:select.option value="{{ $squad->id }}">{{ $squad->name }}</flux:select.option>
+                @endforeach
+            </flux:select>
+        </div>
         <div class="w-56 shrink-0">
             <flux:select multiple variant="listbox" wire:model.live="statusIds" placeholder="All statuses">
                 @foreach($statuses as $status)
@@ -109,15 +123,21 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             </flux:select>
         </div>
         <flux:switch wire:model.live="showInactive" label="Show inactive" class="whitespace-nowrap" />
+
+        <livewire:default-squad :selected="count($squadIds) === 1 ? (int) $squadIds[0] : null" />
     </div>
 
     @if($engineers->isEmpty())
     <flux:card>
         <div class="text-center py-12">
             <flux:icon.users class="mx-auto h-12 w-12 text-zinc-400" />
-            <flux:heading size="lg" class="mt-4">No engineers yet</flux:heading>
-            <flux:text class="mt-2">Add your roster to start planning capacity.</flux:text>
+            <flux:heading size="lg" class="mt-4">{{ empty($squadIds) ? 'No engineers yet' : 'Nobody in this squad' }}</flux:heading>
+            <flux:text class="mt-2">{{ empty($squadIds) ? 'Add your roster to start planning capacity.' : 'Pick another squad, or clear the filter to see everyone.' }}</flux:text>
+            @if(empty($squadIds))
             <flux:button href="/engineers/create" variant="primary" class="mt-6" wire:navigate>Add Engineer</flux:button>
+            @else
+            <flux:button wire:click="$set('squadIds', [])" variant="primary" class="mt-6">Show everyone</flux:button>
+            @endif
         </div>
     </flux:card>
     @else
