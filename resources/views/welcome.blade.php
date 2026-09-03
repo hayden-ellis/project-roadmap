@@ -59,11 +59,18 @@
         <div class="w-full py-16 sm:py-20 lg:py-24">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="text-center max-w-3xl mx-auto">
-                    <h1 class="text-4xl sm:text-5xl lg:text-6xl font-bold text-zinc-900 dark:text-zinc-100 leading-tight">
-                        Visualize Your Product Roadmap
+                    <h1 class="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100 leading-tight">
+                        Plan the quarter.<br>
+                        <span class="bg-gradient-to-r from-cyan-600 to-sky-500 bg-clip-text text-transparent dark:from-cyan-400 dark:to-sky-300">Staff every epic.</span><br>
+                        Watch the math check out.
                     </h1>
                     <p class="mt-6 text-lg sm:text-xl text-zinc-600 dark:text-zinc-400 leading-relaxed">
-                        Plan, track, and collaborate on epics across multiple teams. Keep everyone aligned with a beautiful, intuitive roadmap calendar.
+                        Capacity planning for engineering teams. Put epics in quarters, allocate engineers
+                        week by week, and let points, timelines, and over-allocation warnings fall out of
+                        the plan instead of a spreadsheet.
+                    </p>
+                    <p class="mt-4 text-xs text-zinc-500 dark:text-zinc-500">
+                        Every number is derived. Nothing goes stale.
                     </p>
                     <div class="mt-10 flex items-center justify-center gap-4 flex-wrap">
                         @auth
@@ -97,10 +104,10 @@
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="text-center mb-12">
                     <h2 class="text-3xl sm:text-4xl font-bold text-zinc-900 dark:text-zinc-100">
-                        See Your Work in Action
+                        One plan. Three questions answered.
                     </h2>
                     <p class="mt-4 text-lg text-zinc-600 dark:text-zinc-400">
-                        Track epics across squads with our interactive calendar view
+                        What are we building, who is actually on it, and does it fit?
                     </p>
                 </div>
 
@@ -118,8 +125,8 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                             </svg>
                         </div>
-                        <h3 class="text-xl font-semibold text-zinc-900 dark:text-zinc-100 mb-2">Timeline View</h3>
-                        <p class="text-zinc-600 dark:text-zinc-400">Visualize work across weeks or months with flexible calendar views</p>
+                        <h3 class="text-xl font-semibold text-zinc-900 dark:text-zinc-100 mb-2">Now</h3>
+                        <p class="text-zinc-600 dark:text-zinc-400">See what every engineer is on this week, and pause, staff, or finish work from one screen.</p>
                     </div>
                     <div class="text-center">
                         <div class="inline-flex items-center justify-center w-12 h-12 rounded-lg bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 mb-4">
@@ -127,8 +134,8 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
                             </svg>
                         </div>
-                        <h3 class="text-xl font-semibold text-zinc-900 dark:text-zinc-100 mb-2">Team Management</h3>
-                        <p class="text-zinc-600 dark:text-zinc-400">Organize work by squads with color-coded visualization</p>
+                        <h3 class="text-xl font-semibold text-zinc-900 dark:text-zinc-100 mb-2">Planning</h3>
+                        <p class="text-zinc-600 dark:text-zinc-400">An engineer-by-week grid. Drop people onto epics and capacity totals update as you go.</p>
                     </div>
                     <div class="text-center">
                         <div class="inline-flex items-center justify-center w-12 h-12 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 mb-4">
@@ -136,8 +143,8 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
                             </svg>
                         </div>
-                        <h3 class="text-xl font-semibold text-zinc-900 dark:text-zinc-100 mb-2">Story Points</h3>
-                        <p class="text-zinc-600 dark:text-zinc-400">Track effort with story points and t-shirt sizing</p>
+                        <h3 class="text-xl font-semibold text-zinc-900 dark:text-zinc-100 mb-2">Matrix</h3>
+                        <p class="text-zinc-600 dark:text-zinc-400">Epics against squads for the quarter, with over-allocation flagged before it bites.</p>
                     </div>
                 </div>
             </div>

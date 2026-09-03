@@ -9,7 +9,7 @@
     <flux:sidebar sticky collapsible class="bg-zinc-50 dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-700">
         <flux:sidebar.header>
             <flux:sidebar.brand
-                href="/roadmap"
+                href="{{ route('now') }}"
                 logo="{{ asset('roadmap-icon.png') }}"
                 logo:dark="{{ asset('roadmap-icon.png') }}"
                 name="Project Roadmap" />
