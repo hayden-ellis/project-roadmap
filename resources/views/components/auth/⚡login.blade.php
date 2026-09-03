@@ -39,7 +39,10 @@ new class extends Component
         RateLimiter::clear($this->throttleKey());
         Session::regenerate();
 
-        $this->redirectIntended(default: route('roadmap', absolute: false), navigate: true);
+        // Always land on "now", even if a guarded page was requested first --
+        // the same rule App\Http\Responses\LoginResponse applies to Fortify's
+        // own login endpoint.
+        $this->redirect(route('now', absolute: false), navigate: true);
     }
 
     /**
