@@ -19,7 +19,7 @@ use Livewire\Component;
  * Two epics in one week are allowed and surface as an over-allocation rather
  * than being blocked, because that is a conversation worth having.
  */
-new #[Layout('components.layouts.app.sidebar')] class extends Component
+new #[Layout('components.layouts.app.header')] class extends Component
 {
     #[Url]
     public string $quarter = '';

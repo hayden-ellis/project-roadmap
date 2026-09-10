@@ -19,7 +19,7 @@ use Livewire\Component;
  * seeds a starting position when an epic is created, but from then on the
  * matrix records what somebody decided, not what a formula guessed.
  */
-new #[Layout('components.layouts.app.sidebar')] class extends Component
+new #[Layout('components.layouts.app.header')] class extends Component
 {
     /** The four quadrant keys, importance/urgency. */
     private const QUADRANTS = ['high/urgent', 'high/not_urgent', 'low/urgent', 'low/not_urgent'];

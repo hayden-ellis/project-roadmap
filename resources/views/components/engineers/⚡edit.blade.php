@@ -13,7 +13,7 @@ use Livewire\Attributes\Validate;
 use Livewire\Component;
 use Livewire\WithFileUploads;
 
-new #[Layout('components.layouts.app.sidebar')] class extends Component
+new #[Layout('components.layouts.app.header')] class extends Component
 {
     use WithFileUploads;
 

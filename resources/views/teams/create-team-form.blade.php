@@ -1,36 +1,20 @@
-<x-form-section submit="createTeam">
-    <x-slot name="title">
-        {{ __('Team Details') }}
-    </x-slot>
-
-    <x-slot name="description">
-        {{ __('Create a new team to collaborate with others on projects.') }}
-    </x-slot>
-
-    <x-slot name="form">
-        <div class="col-span-6">
-            <x-label value="{{ __('Team Owner') }}" />
-
-            <div class="flex items-center mt-2">
-                <img class="size-12 rounded-full object-cover" src="{{ $this->user->profile_photo_url }}" alt="{{ $this->user->name }}">
-
-                <div class="ms-4 leading-tight">
-                    <div class="text-zinc-900 dark:text-zinc-100">{{ $this->user->name }}</div>
-                    <div class="text-zinc-700 dark:text-zinc-400 text-sm">{{ $this->user->email }}</div>
-                </div>
+<form wire:submit="createTeam" class="space-y-6">
+    <flux:field>
+        <flux:label>{{ __('Owner') }}</flux:label>
+        <div class="mt-2 flex items-center gap-3">
+            <flux:avatar circle :name="$this->user->name" :src="$this->user->profile_photo_path ? $this->user->profile_photo_url : null" />
+            <div class="min-w-0 leading-tight">
+                <div class="truncate text-sm font-medium">{{ $this->user->name }}</div>
+                <flux:text size="sm" class="truncate">{{ $this->user->email }}</flux:text>
             </div>
         </div>
+    </flux:field>
 
-        <div class="col-span-6 sm:col-span-4">
-            <x-label for="name" value="{{ __('Team Name') }}" />
-            <x-input id="name" type="text" class="mt-1 block w-full" wire:model="state.name" autofocus />
-            <x-input-error for="name" class="mt-2" />
-        </div>
-    </x-slot>
+    <flux:input wire:model="state.name" error:name="name" :label="__('Team name')" type="text" required autofocus data-test="team-name-input" />
 
-    <x-slot name="actions">
-        <x-button>
-            {{ __('Create') }}
-        </x-button>
-    </x-slot>
-</x-form-section>
+    <div>
+        <flux:button variant="primary" type="submit" data-test="create-team-button">
+            {{ __('Create team') }}
+        </flux:button>
+    </div>
+</form>

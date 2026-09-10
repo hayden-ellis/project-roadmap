@@ -1,260 +1,186 @@
-<div>
-    @if (Gate::check('addTeamMember', $team))
-        <x-section-border />
+@php($canManage = Gate::check('addTeamMember', $team))
 
-        <!-- Add Team Member -->
-        <div class="mt-10 sm:mt-0">
-            <x-form-section submit="addTeamMember">
-                <x-slot name="title">
-                    {{ __('Add Team Member') }}
-                </x-slot>
+<div class="space-y-12">
+    {{-- Jetstream announces a successful add with "saved"; that closes the
+         invite sheet and confirms it. A failed add leaves the sheet open,
+         since the sheet is client-side state and the errors render inside it. --}}
+    <span
+        x-data
+        x-init="$wire.$on('saved', () => { $flux.modal('add-member').close(); $flux.toast({ text: @js(__('Invitation sent.')), variant: 'success' }) })"
+        hidden
+    ></span>
 
-                <x-slot name="description">
-                    {{ __('Add a new team member to your team, allowing them to collaborate with you.') }}
-                </x-slot>
+    <section class="space-y-6">
+        <div class="flex items-center justify-between gap-4">
+            <div>
+                <flux:heading>{{ __('Members') }}</flux:heading>
+                <flux:subheading>{{ __('Who is on this team, and what they can do') }}</flux:subheading>
+            </div>
 
-                <x-slot name="form">
-                    <div class="col-span-6">
-                        <div class="max-w-xl text-sm text-zinc-600 dark:text-zinc-400">
-                            {{ __('Please provide the email address of the person you would like to add to this team.') }}
-                        </div>
-                    </div>
-
-                    <!-- Member Email -->
-                    <div class="col-span-6 sm:col-span-4">
-                        <x-label for="email" value="{{ __('Email') }}" />
-                        <x-input id="email" type="email" class="mt-1 block w-full" wire:model="addTeamMemberForm.email" />
-                        <x-input-error for="email" class="mt-2" />
-                    </div>
-
-                    <!-- Role -->
-                    @if (count($this->roles) > 0)
-                        <div class="col-span-6 lg:col-span-4">
-                            <x-label for="role" value="{{ __('Role') }}" />
-                            <x-input-error for="role" class="mt-2" />
-
-                            <div class="relative z-0 mt-1 border border-gray-200 dark:border-zinc-700 rounded-lg cursor-pointer">
-                                @foreach ($this->roles as $index => $role)
-                                    <button type="button" class="relative px-4 py-3 inline-flex w-full rounded-lg focus:z-10 focus:outline-hidden focus:border-indigo-500 dark:focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-400 {{ $index > 0 ? 'border-t border-gray-200 dark:border-zinc-700 focus:border-none rounded-t-none' : '' }} {{ ! $loop->last ? 'rounded-b-none' : '' }}"
-                                                    wire:click="$set('addTeamMemberForm.role', '{{ $role->key }}')">
-                                        <div class="{{ isset($addTeamMemberForm['role']) && $addTeamMemberForm['role'] !== $role->key ? 'opacity-50' : '' }}">
-                                            <!-- Role Name -->
-                                            <div class="flex items-center">
-                                                <div class="text-sm text-zinc-600 dark:text-zinc-400 {{ $addTeamMemberForm['role'] == $role->key ? 'font-semibold' : '' }}">
-                                                    {{ $role->name }}
-                                                </div>
-
-                                                @if ($addTeamMemberForm['role'] == $role->key)
-                                                    <svg class="ms-2 size-5 text-green-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                                                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                                    </svg>
-                                                @endif
-                                            </div>
-
-                                            <!-- Role Description -->
-                                            <div class="mt-2 text-xs text-zinc-600 dark:text-zinc-500 text-start">
-                                                {{ $role->description }}
-                                            </div>
-                                        </div>
-                                    </button>
-                                @endforeach
-                            </div>
-                        </div>
-                    @endif
-                </x-slot>
-
-                <x-slot name="actions">
-                    <x-action-message class="me-3" on="saved">
-                        {{ __('Added.') }}
-                    </x-action-message>
-
-                    <x-button>
-                        {{ __('Add') }}
-                    </x-button>
-                </x-slot>
-            </x-form-section>
+            @if ($canManage)
+                <flux:modal.trigger name="add-member">
+                    <flux:button variant="primary" icon="user-plus" data-test="add-member-button">
+                        {{ __('Add member') }}
+                    </flux:button>
+                </flux:modal.trigger>
+            @endif
         </div>
-    @endif
 
-    @if ($team->teamInvitations->isNotEmpty() && Gate::check('addTeamMember', $team))
-        <x-section-border />
+        @if ($team->users->isNotEmpty())
+            <div class="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700">
+                @foreach ($team->users->sortBy('name') as $user)
+                    <div class="flex items-center gap-4 p-4 {{ ! $loop->last ? 'border-b border-zinc-200 dark:border-zinc-700' : '' }}" data-test="member-row" wire:key="member-{{ $user->id }}">
+                        <flux:avatar circle :name="$user->name" :src="$user->profile_photo_path ? $user->profile_photo_url : null" />
 
-        <!-- Team Member Invitations -->
-        <div class="mt-10 sm:mt-0">
-            <x-action-section>
-                <x-slot name="title">
-                    {{ __('Pending Team Invitations') }}
-                </x-slot>
-
-                <x-slot name="description">
-                    {{ __('These people have been invited to your team and have been sent an invitation email. They may join the team by accepting the email invitation.') }}
-                </x-slot>
-
-                <x-slot name="content">
-                    <div class="space-y-6">
-                        @foreach ($team->teamInvitations as $invitation)
-                            <div class="flex items-center justify-between">
-                                <div class="text-zinc-600 dark:text-zinc-400">{{ $invitation->email }}</div>
-
-                                <div class="flex items-center">
-                                    @if (Gate::check('removeTeamMember', $team))
-                                        <!-- Cancel Team Invitation -->
-                                        <button class="cursor-pointer ms-6 text-sm text-red-500 dark:text-red-400 focus:outline-hidden"
-                                                            wire:click="cancelTeamInvitation({{ $invitation->id }})">
-                                            {{ __('Cancel') }}
-                                        </button>
-                                    @endif
-                                </div>
-                            </div>
-                        @endforeach
-                    </div>
-                </x-slot>
-            </x-action-section>
-        </div>
-    @endif
-
-    @if ($team->users->isNotEmpty())
-        <x-section-border />
-
-        <!-- Manage Team Members -->
-        <div class="mt-10 sm:mt-0">
-            <x-action-section>
-                <x-slot name="title">
-                    {{ __('Team Members') }}
-                </x-slot>
-
-                <x-slot name="description">
-                    {{ __('All of the people that are part of this team.') }}
-                </x-slot>
-
-                <!-- Team Member List -->
-                <x-slot name="content">
-                    <div class="space-y-6">
-                        @foreach ($team->users->sortBy('name') as $user)
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center">
-                                    <img class="size-8 rounded-full object-cover" src="{{ $user->profile_photo_url }}" alt="{{ $user->name }}">
-                                    <div class="ms-4 dark:text-zinc-300">{{ $user->name }}</div>
-                                </div>
-
-                                <div class="flex items-center">
-                                    <!-- Manage Team Member Role -->
-                                    @if (Gate::check('updateTeamMember', $team) && Laravel\Jetstream\Jetstream::hasRoles())
-                                        <button class="ms-2 text-sm text-zinc-400 dark:text-zinc-500 underline" wire:click="manageRole('{{ $user->id }}')">
-                                            {{ Laravel\Jetstream\Jetstream::findRole($user->membership->role)->name }}
-                                        </button>
-                                    @elseif (Laravel\Jetstream\Jetstream::hasRoles())
-                                        <div class="ms-2 text-sm text-zinc-400 dark:text-zinc-500">
-                                            {{ Laravel\Jetstream\Jetstream::findRole($user->membership->role)->name }}
-                                        </div>
-                                    @endif
-
-                                    <!-- Leave Team -->
-                                    @if ($this->user->id === $user->id)
-                                        <button class="cursor-pointer ms-6 text-sm text-red-500 dark:text-red-400" wire:click="$toggle('confirmingLeavingTeam')">
-                                            {{ __('Leave') }}
-                                        </button>
-
-                                    <!-- Remove Team Member -->
-                                    @elseif (Gate::check('removeTeamMember', $team))
-                                        <button class="cursor-pointer ms-6 text-sm text-red-500 dark:text-red-400" wire:click="confirmTeamMemberRemoval('{{ $user->id }}')">
-                                            {{ __('Remove') }}
-                                        </button>
-                                    @endif
-                                </div>
-                            </div>
-                        @endforeach
-                    </div>
-                </x-slot>
-            </x-action-section>
-        </div>
-    @endif
-
-    <!-- Role Management Modal -->
-    <x-dialog-modal wire:model.live="currentlyManagingRole">
-        <x-slot name="title">
-            {{ __('Manage Role') }}
-        </x-slot>
-
-        <x-slot name="content">
-            <div class="relative z-0 mt-1 border border-gray-200 dark:border-zinc-700 rounded-lg cursor-pointer">
-                @foreach ($this->roles as $index => $role)
-                    <button type="button" class="relative px-4 py-3 inline-flex w-full rounded-lg focus:z-10 focus:outline-hidden focus:border-indigo-500 dark:focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-400 {{ $index > 0 ? 'border-t border-gray-200 dark:border-zinc-700 focus:border-none rounded-t-none' : '' }} {{ ! $loop->last ? 'rounded-b-none' : '' }}"
-                                    wire:click="$set('currentRole', '{{ $role->key }}')">
-                        <div class="{{ $currentRole !== $role->key ? 'opacity-50' : '' }}">
-                            <!-- Role Name -->
-                            <div class="flex items-center">
-                                <div class="text-sm text-zinc-600 dark:text-zinc-400 {{ $currentRole == $role->key ? 'font-semibold' : '' }}">
-                                    {{ $role->name }}
-                                </div>
-
-                                @if ($currentRole == $role->key)
-                                    <svg class="ms-2 size-5 text-green-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    </svg>
+                        <div class="min-w-0 flex-1">
+                            <p class="truncate text-sm font-medium">
+                                {{ $user->name }}
+                                @if ($team->user_id === $user->id)
+                                    <span class="text-zinc-400 dark:text-zinc-500">&middot; {{ __('owner') }}</span>
                                 @endif
-                            </div>
-
-                            <!-- Role Description -->
-                            <div class="mt-2 text-xs text-zinc-600 dark:text-zinc-500 text-start">
-                                {{ $role->description }}
-                            </div>
+                            </p>
+                            <flux:text size="sm" class="truncate">{{ $user->email }}</flux:text>
                         </div>
-                    </button>
+
+                        <div class="flex shrink-0 items-center gap-2">
+                            @if (Laravel\Jetstream\Jetstream::hasRoles() && $user->membership?->role)
+                                @php($roleName = Laravel\Jetstream\Jetstream::findRole($user->membership->role)?->name ?? $user->membership->role)
+
+                                @if (Gate::check('updateTeamMember', $team))
+                                    <flux:button variant="outline" size="sm" icon:trailing="chevron-down" wire:click="manageRole('{{ $user->id }}')" data-test="member-role-trigger">
+                                        {{ $roleName }}
+                                    </flux:button>
+                                @else
+                                    <flux:badge size="sm" color="zinc">{{ $roleName }}</flux:badge>
+                                @endif
+                            @endif
+
+                            @if ($this->user->id === $user->id)
+                                <flux:tooltip :content="__('Leave team')">
+                                    <flux:button variant="ghost" size="sm" icon="arrow-right-start-on-rectangle" wire:click="$toggle('confirmingLeavingTeam')" :aria-label="__('Leave team')" data-test="leave-team-button" />
+                                </flux:tooltip>
+                            @elseif (Gate::check('removeTeamMember', $team))
+                                <flux:tooltip :content="__('Remove from team')">
+                                    <flux:button variant="ghost" size="sm" icon="x-mark" wire:click="confirmTeamMemberRemoval('{{ $user->id }}')" :aria-label="__('Remove from team')" data-test="member-remove-button" />
+                                </flux:tooltip>
+                            @endif
+                        </div>
+                    </div>
                 @endforeach
             </div>
-        </x-slot>
+        @endif
+    </section>
 
-        <x-slot name="footer">
-            <x-secondary-button wire:click="stopManagingRole" wire:loading.attr="disabled">
-                {{ __('Cancel') }}
-            </x-secondary-button>
+    @if ($team->teamInvitations->isNotEmpty() && $canManage)
+        <section class="space-y-6">
+            <div>
+                <flux:heading>{{ __('Pending invitations') }}</flux:heading>
+                <flux:subheading>{{ __('Sent by email and not accepted yet') }}</flux:subheading>
+            </div>
 
-            <x-button class="ms-3" wire:click="updateRole" wire:loading.attr="disabled">
-                {{ __('Save') }}
-            </x-button>
-        </x-slot>
-    </x-dialog-modal>
+            <div class="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700">
+                @foreach ($team->teamInvitations as $invitation)
+                    <div class="flex items-center gap-4 p-4 {{ ! $loop->last ? 'border-b border-zinc-200 dark:border-zinc-700' : '' }}" data-test="invitation-row" wire:key="invitation-{{ $invitation->id }}">
+                        <div class="flex size-10 shrink-0 items-center justify-center rounded-full bg-zinc-100 dark:bg-zinc-800">
+                            <flux:icon.envelope class="size-5 text-zinc-500 dark:text-zinc-400" />
+                        </div>
 
-    <!-- Leave Team Confirmation Modal -->
-    <x-confirmation-modal wire:model.live="confirmingLeavingTeam">
-        <x-slot name="title">
-            {{ __('Leave Team') }}
-        </x-slot>
+                        <div class="min-w-0 flex-1">
+                            <p class="truncate text-sm font-medium">{{ $invitation->email }}</p>
+                            @if ($invitation->role)
+                                <flux:text size="sm">{{ Laravel\Jetstream\Jetstream::findRole($invitation->role)?->name ?? $invitation->role }}</flux:text>
+                            @endif
+                        </div>
 
-        <x-slot name="content">
-            {{ __('Are you sure you would like to leave this team?') }}
-        </x-slot>
+                        @if (Gate::check('removeTeamMember', $team))
+                            <flux:tooltip :content="__('Cancel invitation')">
+                                <flux:button variant="ghost" size="sm" icon="x-mark" wire:click="cancelTeamInvitation({{ $invitation->id }})" :aria-label="__('Cancel invitation')" data-test="invitation-cancel-button" />
+                            </flux:tooltip>
+                        @endif
+                    </div>
+                @endforeach
+            </div>
+        </section>
+    @endif
 
-        <x-slot name="footer">
-            <x-secondary-button wire:click="$toggle('confirmingLeavingTeam')" wire:loading.attr="disabled">
-                {{ __('Cancel') }}
-            </x-secondary-button>
+    {{-- Add / invite --}}
+    @if ($canManage)
+        <flux:modal name="add-member" class="max-w-lg">
+            <form wire:submit="addTeamMember" class="space-y-6">
+                <div>
+                    <flux:heading size="lg">{{ __('Add a team member') }}</flux:heading>
+                    <flux:subheading>{{ __('They get an email invitation and join when they accept it.') }}</flux:subheading>
+                </div>
 
-            <x-danger-button class="ms-3" wire:click="leaveTeam" wire:loading.attr="disabled">
-                {{ __('Leave') }}
-            </x-danger-button>
-        </x-slot>
-    </x-confirmation-modal>
+                <flux:input wire:model="addTeamMemberForm.email" error:name="email" :label="__('Email address')" type="email" required data-test="invite-email" />
 
-    <!-- Remove Team Member Confirmation Modal -->
-    <x-confirmation-modal wire:model.live="confirmingTeamMemberRemoval">
-        <x-slot name="title">
-            {{ __('Remove Team Member') }}
-        </x-slot>
+                @if (count($this->roles) > 0)
+                    <flux:radio.group wire:model="addTeamMemberForm.role" :label="__('Role')" variant="cards" class="max-sm:flex-col" data-test="invite-role">
+                        @foreach ($this->roles as $role)
+                            <flux:radio :value="$role->key" :label="$role->name" :description="$role->description" />
+                        @endforeach
+                    </flux:radio.group>
+                    <flux:error name="role" />
+                @endif
 
-        <x-slot name="content">
-            {{ __('Are you sure you would like to remove this person from the team?') }}
-        </x-slot>
+                <div class="flex justify-end gap-2">
+                    <flux:modal.close>
+                        <flux:button variant="filled">{{ __('Cancel') }}</flux:button>
+                    </flux:modal.close>
+                    <flux:button variant="primary" type="submit" data-test="invite-submit">{{ __('Send invitation') }}</flux:button>
+                </div>
+            </form>
+        </flux:modal>
+    @endif
 
-        <x-slot name="footer">
-            <x-secondary-button wire:click="$toggle('confirmingTeamMemberRemoval')" wire:loading.attr="disabled">
-                {{ __('Cancel') }}
-            </x-secondary-button>
+    {{-- Change role --}}
+    <flux:modal wire:model.self="currentlyManagingRole" class="max-w-lg">
+        <form wire:submit="updateRole" class="space-y-6">
+            <div>
+                <flux:heading size="lg">{{ __('Change role') }}</flux:heading>
+                <flux:subheading>{{ __('What this person can do on the team.') }}</flux:subheading>
+            </div>
 
-            <x-danger-button class="ms-3" wire:click="removeTeamMember" wire:loading.attr="disabled">
-                {{ __('Remove') }}
-            </x-danger-button>
-        </x-slot>
-    </x-confirmation-modal>
+            <flux:radio.group wire:model="currentRole" variant="cards" class="max-sm:flex-col">
+                @foreach ($this->roles as $role)
+                    <flux:radio :value="$role->key" :label="$role->name" :description="$role->description" />
+                @endforeach
+            </flux:radio.group>
+
+            <div class="flex justify-end gap-2">
+                <flux:button variant="filled" wire:click="stopManagingRole" wire:loading.attr="disabled">{{ __('Cancel') }}</flux:button>
+                <flux:button variant="primary" type="submit" wire:loading.attr="disabled">{{ __('Save') }}</flux:button>
+            </div>
+        </form>
+    </flux:modal>
+
+    {{-- Leave --}}
+    <flux:modal wire:model.self="confirmingLeavingTeam" class="max-w-lg">
+        <form wire:submit="leaveTeam" class="space-y-6">
+            <div>
+                <flux:heading size="lg">{{ __('Leave :name?', ['name' => $team->name]) }}</flux:heading>
+                <flux:subheading>{{ __('You will lose access to its board until someone adds you back.') }}</flux:subheading>
+            </div>
+
+            <div class="flex justify-end gap-2">
+                <flux:button variant="filled" wire:click="$toggle('confirmingLeavingTeam')" wire:loading.attr="disabled">{{ __('Cancel') }}</flux:button>
+                <flux:button variant="danger" type="submit" wire:loading.attr="disabled">{{ __('Leave team') }}</flux:button>
+            </div>
+        </form>
+    </flux:modal>
+
+    {{-- Remove --}}
+    <flux:modal wire:model.self="confirmingTeamMemberRemoval" class="max-w-lg">
+        <form wire:submit="removeTeamMember" class="space-y-6">
+            <div>
+                <flux:heading size="lg">{{ __('Remove this person?') }}</flux:heading>
+                <flux:subheading>{{ __('They lose access to the team right away. You can add them back later.') }}</flux:subheading>
+            </div>
+
+            <div class="flex justify-end gap-2">
+                <flux:button variant="filled" wire:click="$toggle('confirmingTeamMemberRemoval')" wire:loading.attr="disabled">{{ __('Cancel') }}</flux:button>
+                <flux:button variant="danger" type="submit" wire:loading.attr="disabled" data-test="remove-member-confirm">{{ __('Remove') }}</flux:button>
+            </div>
+        </form>
+    </flux:modal>
 </div>

@@ -33,7 +33,7 @@ use Livewire\Component;
  * A status flagged "ask why on arrival" prompts for a reason when work lands
  * in it, which is how the pause record keeps getting written.
  */
-new #[Layout('components.layouts.app.sidebar')] class extends Component
+new #[Layout('components.layouts.app.header')] class extends Component
 {
     /**
      * How much each card shows. Remembered per user, because the right answer

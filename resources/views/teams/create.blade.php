@@ -1,13 +1,7 @@
 <x-app-layout>
-    <x-slot name="header">
-        <h2 class="font-semibold text-xl text-zinc-800 dark:text-zinc-200 leading-tight">
-            {{ __('Create Team') }}
-        </h2>
-    </x-slot>
+    <x-slot name="title">{{ __('Create team') }}</x-slot>
 
-    <div>
-        <div class="max-w-7xl mx-auto py-10 sm:px-6 lg:px-8">
-            @livewire('teams.create-team-form')
-        </div>
-    </div>
+    <x-settings.layout :heading="__('New team')" :subheading="__('A team has its own board, squads, epics and people')">
+        @livewire('teams.create-team-form')
+    </x-settings.layout>
 </x-app-layout>

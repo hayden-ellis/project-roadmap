@@ -5,7 +5,7 @@ use Livewire\Attributes\Layout;
 use Livewire\Attributes\Validate;
 use Livewire\Component;
 
-new #[Layout('components.layouts.app.sidebar')] class extends Component
+new #[Layout('components.layouts.app.header')] class extends Component
 {
     #[Validate('required|string|max:50')]
     public string $name = '';

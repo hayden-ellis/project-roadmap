@@ -13,7 +13,7 @@ use Livewire\Component;
  * row and the column moves. Everything writes as you change it, matching the
  * epic page -- there is no save button anywhere in Manage.
  */
-new #[Layout('components.layouts.app.sidebar')] class extends Component
+new #[Layout('components.layouts.app.header')] class extends Component
 {
     /** Status being renamed / recoloured, or null when the list is at rest. */
     public ?int $editingId = null;

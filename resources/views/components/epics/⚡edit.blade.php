@@ -30,7 +30,7 @@ use Livewire\Component;
  * selected quarter and writes them back, so staffing can be adjusted here
  * instead of only from the planning grid.
  */
-new #[Layout('components.layouts.app.sidebar')] class extends Component
+new #[Layout('components.layouts.app.header')] class extends Component
 {
     /** Fields with a validation rule attached; is_recurring has none. */
     private const VALIDATED = ['title', 'description', 'status_id', 'category_id', 'priority', 'start_date', 'end_date', 'jira_epic_url', 'jpd_idea_url'];

@@ -1,87 +1,65 @@
-<x-form-section submit="updateProfileInformation">
-    <x-slot name="title">
-        {{ __('Profile Information') }}
-    </x-slot>
+<form wire:submit="updateProfileInformation" class="space-y-6">
+    <x-saved-toast on="saved" text="Profile saved." />
 
-    <x-slot name="description">
-        {{ __('Update your account\'s profile information and email address.') }}
-    </x-slot>
+    @if (Laravel\Jetstream\Jetstream::managesProfilePhotos())
+        <flux:field>
+            <flux:label>{{ __('Photo') }}</flux:label>
 
-    <x-slot name="form">
-        <!-- Profile Photo -->
-        @if (Laravel\Jetstream\Jetstream::managesProfilePhotos())
-            <div class="col-span-6 sm:col-span-4">
-                <x-label value="{{ __('Photo') }}" />
+            <div class="mt-2 flex items-center gap-4">
+                {{-- Initials until a photo exists; never a third-party
+                     avatar service, same stance as the engineer faces. --}}
+                <flux:avatar
+                    circle
+                    size="xl"
+                    :name="$this->user->name"
+                    :src="$this->user->profile_photo_path ? $this->user->profile_photo_url : null"
+                />
 
-                <div class="mt-2 flex items-center gap-4">
-                    {{-- Initials until a photo exists; never a third-party
-                         avatar service, same stance as the engineer faces. --}}
-                    <flux:avatar
-                        circle
-                        size="xl"
-                        :name="$this->user->name"
-                        :src="$this->user->profile_photo_path ? $this->user->profile_photo_url : null"
-                    />
+                <div class="flex-1 min-w-0 space-y-2">
+                    <flux:file-upload wire:model.live="photo" accept="image/png,image/jpeg,image/webp">
+                        <flux:file-upload.dropzone
+                            inline
+                            heading="{{ __('Drop a photo here, or click to browse') }}"
+                            text="{{ __('PNG, JPG or WebP, up to 2 MB. Saves right away.') }}"
+                        />
+                    </flux:file-upload>
 
-                    <div class="flex-1 min-w-0 space-y-2">
-                        <flux:file-upload wire:model.live="photo" accept="image/png,image/jpeg,image/webp">
-                            <flux:file-upload.dropzone
-                                inline
-                                heading="{{ __('Drop a photo here, or click to browse') }}"
-                                text="{{ __('PNG, JPG or WebP, up to 2 MB. Saves right away.') }}"
-                            />
-                        </flux:file-upload>
-
-                        @if ($this->user->profile_photo_path)
-                            <flux:button type="button" size="sm" variant="subtle" wire:click="deleteProfilePhoto">
-                                {{ __('Remove photo') }}
-                            </flux:button>
-                        @endif
-                    </div>
+                    @if ($this->user->profile_photo_path)
+                        <flux:button type="button" size="sm" variant="subtle" wire:click="deleteProfilePhoto">
+                            {{ __('Remove photo') }}
+                        </flux:button>
+                    @endif
                 </div>
-
-                <x-input-error for="photo" class="mt-2" />
             </div>
-        @endif
 
-        <!-- Name -->
-        <div class="col-span-6 sm:col-span-4">
-            <x-label for="name" value="{{ __('Name') }}" />
-            <x-input id="name" type="text" class="mt-1 block w-full" wire:model="state.name" required autocomplete="name" />
-            <x-input-error for="name" class="mt-2" />
-        </div>
+            <flux:error name="photo" />
+        </flux:field>
+    @endif
 
-        <!-- Email -->
-        <div class="col-span-6 sm:col-span-4">
-            <x-label for="email" value="{{ __('Email') }}" />
-            <x-input id="email" type="email" class="mt-1 block w-full" wire:model="state.email" required autocomplete="username" />
-            <x-input-error for="email" class="mt-2" />
+    <flux:input wire:model="state.name" error:name="name" :label="__('Name')" type="text" required autocomplete="name" />
 
-            @if (Laravel\Fortify\Features::enabled(Laravel\Fortify\Features::emailVerification()) && ! $this->user->hasVerifiedEmail())
-                <p class="text-sm mt-2 text-zinc-600 dark:text-zinc-400">
-                    {{ __('Your email address is unverified.') }}
+    <div>
+        <flux:input wire:model="state.email" error:name="email" :label="__('Email')" type="email" required autocomplete="username" />
 
-                    <button type="button" class="underline text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 rounded-md focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500" wire:click.prevent="sendEmailVerification">
-                        {{ __('Click here to re-send the verification email.') }}
-                    </button>
-                </p>
+        @if (Laravel\Fortify\Features::enabled(Laravel\Fortify\Features::emailVerification()) && ! $this->user->hasVerifiedEmail())
+            <flux:text class="mt-3">
+                {{ __('Your email address is unverified.') }}
+                <flux:link class="cursor-pointer text-sm" wire:click.prevent="sendEmailVerification">
+                    {{ __('Re-send the verification email.') }}
+                </flux:link>
+            </flux:text>
 
-                @if ($this->verificationLinkSent)
-                    <p class="mt-2 font-medium text-sm text-green-600 dark:text-green-400">
-                        {{ __('A new verification link has been sent to your email address.') }}
-                    </p>
-                @endif
+            @if ($this->verificationLinkSent)
+                <flux:text class="mt-2 font-medium text-green-600 dark:text-green-400">
+                    {{ __('A new verification link has been sent to your email address.') }}
+                </flux:text>
             @endif
-        </div>
-    </x-slot>
+        @endif
+    </div>
 
-    <x-slot name="actions">
-        <x-action-message class="me-3" on="saved">
-            {{ __('Saved.') }}
-        </x-action-message>
-
-        <x-button wire:loading.attr="disabled" wire:target="photo">
+    <div>
+        <flux:button variant="primary" type="submit" data-test="update-profile-button">
             {{ __('Save') }}
-        </x-button>
-    </x-slot>
-</x-form-section>
+        </flux:button>
+    </div>
+</form>

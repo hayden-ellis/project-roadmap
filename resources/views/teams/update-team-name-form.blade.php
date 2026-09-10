@@ -1,50 +1,34 @@
-<x-form-section submit="updateTeamName">
-    <x-slot name="title">
-        {{ __('Team Name') }}
-    </x-slot>
+<section class="space-y-6">
+    <x-saved-toast on="saved" text="Team saved." />
 
-    <x-slot name="description">
-        {{ __('The team\'s name and owner information.') }}
-    </x-slot>
-
-    <x-slot name="form">
-        <!-- Team Owner Information -->
-        <div class="col-span-6">
-            <x-label value="{{ __('Team Owner') }}" />
-
-            <div class="flex items-center mt-2">
-                <img class="size-12 rounded-full object-cover" src="{{ $team->owner->profile_photo_url }}" alt="{{ $team->owner->name }}">
-
-                <div class="ms-4 leading-tight">
-                    <div class="text-zinc-900 dark:text-zinc-100">{{ $team->owner->name }}</div>
-                    <div class="text-zinc-700 dark:text-zinc-400 text-sm">{{ $team->owner->email }}</div>
+    <form wire:submit="updateTeamName" class="space-y-6">
+        <flux:field>
+            <flux:label>{{ __('Owner') }}</flux:label>
+            <div class="mt-2 flex items-center gap-3">
+                <flux:avatar circle :name="$team->owner->name" :src="$team->owner->profile_photo_path ? $team->owner->profile_photo_url : null" />
+                <div class="min-w-0 leading-tight">
+                    <div class="truncate text-sm font-medium">{{ $team->owner->name }}</div>
+                    <flux:text size="sm" class="truncate">{{ $team->owner->email }}</flux:text>
                 </div>
             </div>
-        </div>
+        </flux:field>
 
-        <!-- Team Name -->
-        <div class="col-span-6 sm:col-span-4">
-            <x-label for="name" value="{{ __('Team Name') }}" />
+        <flux:input
+            wire:model="state.name"
+            error:name="name"
+            :label="__('Team name')"
+            type="text"
+            required
+            :disabled="! Gate::check('update', $team)"
+            data-test="team-name-input"
+        />
 
-            <x-input id="name"
-                        type="text"
-                        class="mt-1 block w-full"
-                        wire:model="state.name"
-                        :disabled="! Gate::check('update', $team)" />
-
-            <x-input-error for="name" class="mt-2" />
-        </div>
-    </x-slot>
-
-    @if (Gate::check('update', $team))
-        <x-slot name="actions">
-            <x-action-message class="me-3" on="saved">
-                {{ __('Saved.') }}
-            </x-action-message>
-
-            <x-button>
-                {{ __('Save') }}
-            </x-button>
-        </x-slot>
-    @endif
-</x-form-section>
+        @if (Gate::check('update', $team))
+            <div>
+                <flux:button variant="primary" type="submit" data-test="team-save-button">
+                    {{ __('Save') }}
+                </flux:button>
+            </div>
+        @endif
+    </form>
+</section>

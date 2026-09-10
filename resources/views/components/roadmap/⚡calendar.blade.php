@@ -17,7 +17,7 @@ use Livewire\Component;
  * hand-typed epic_squad date range -- a roadmap that cannot drift from
  * staffing.
  */
-new #[Layout('components.layouts.app.sidebar')] class extends Component
+new #[Layout('components.layouts.app.header')] class extends Component
 {
     #[Url]
     public array $selected_squads = [];

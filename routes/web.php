@@ -21,6 +21,11 @@ Route::middleware([
 ])->group(function () {
     /* Route::livewire('/dashboard', 'dashboard')->name('dashboard'); */
 
+    // Settings. Profile stays on Jetstream's /user/profile; these two are
+    // the other sections of the same settings shell.
+    Route::view('/settings/security', 'settings.security')->name('settings.security');
+    Route::view('/settings/appearance', 'settings.appearance')->name('settings.appearance');
+
     Route::livewire('/now', 'now')->name('now');
 
     Route::livewire('/matrix', 'matrix')->name('matrix');

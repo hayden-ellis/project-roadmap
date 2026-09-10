@@ -5,17 +5,13 @@ use Illuminate\Support\Facades\Auth;
 use Livewire\Component;
 
 /**
- * The bell. One instance lives in the sidebar and one in the mobile
- * header; the variant only changes the trigger, the panel is shared.
+ * The bell in the header.
  *
  * Notifications are read the moment they are opened, not the moment the
  * panel is -- glancing at the list costs nothing.
  */
 new class extends Component
 {
-    /** 'sidebar' or 'header'; picks the trigger the dropdown hangs off. */
-    public string $variant = 'sidebar';
-
     public function markAllRead(): void
     {
         Auth::user()->unreadNotifications->markAsRead();
@@ -52,34 +48,33 @@ new class extends Component
 ?>
 
 <div wire:poll.60s>
-    <flux:dropdown position="bottom" align="{{ $variant === 'header' ? 'end' : 'start' }}" class="{{ $variant === 'sidebar' ? 'w-full' : '' }}">
+    <flux:dropdown position="bottom" align="end">
+        {{-- The icon lives in the slot rather than the `icon` prop so the
+             count can anchor to the bell itself. --}}
+        <flux:button
+            variant="subtle"
+            square
+            class="relative"
+            :aria-label="$unreadCount === 0 ? __('Notifications') : trans_choice('{1}:count unread notification|[2,*]:count unread notifications', $unreadCount, ['count' => $unreadCount])"
+            data-test="notification-bell"
+        >
+            <span class="relative inline-flex">
+                <flux:icon.bell variant="micro" class="size-5" />
 
-        @if($variant === 'header')
-        <button type="button" class="relative p-2 rounded-lg text-zinc-500 dark:text-zinc-400 hover:bg-zinc-800/5 dark:hover:bg-white/10 transition-colors">
-            <flux:icon icon="bell" class="size-5" />
-            @if($unreadCount > 0)
-            <span class="absolute top-0.5 right-0.5 min-w-4 h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-semibold leading-4 text-center tabular-nums">
-                {{ $unreadCount > 9 ? '9+' : $unreadCount }}
-            </span>
-            @endif
-        </button>
-        @else
-        {{-- Styled after the teams dropdown so it survives the collapsed sidebar. --}}
-        <button type="button" class="w-full group flex items-center gap-2 px-2 py-1.5 rounded-lg text-zinc-500 dark:text-zinc-400 hover:bg-zinc-800/5 dark:hover:bg-white/10 hover:text-zinc-800 dark:hover:text-white transition-colors in-data-flux-sidebar-collapsed-desktop:justify-center in-data-flux-sidebar-collapsed-desktop:px-0">
-            <span class="relative shrink-0">
-                <flux:icon icon="bell" variant="outline" class="size-5" />
                 @if($unreadCount > 0)
-                <span class="absolute -top-1 -right-1 size-2 rounded-full bg-red-500 in-data-flux-sidebar-collapsed-desktop:block hidden"></span>
+                {{-- Sits on the bell's top-right corner rather than over its
+                     body: smaller than the glyph and offset by roughly its
+                     own radius, so one digit kisses the corner and a wider
+                     count grows rightward into empty space. --}}
+                <span aria-hidden="true"
+                    class="absolute -right-1.5 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-accent px-1 text-[9px] font-semibold leading-none text-white ring-2 ring-zinc-50 tabular-nums dark:ring-zinc-900"
+                    data-test="notification-count"
+                >
+                    {{ $unreadCount > 99 ? '99+' : $unreadCount }}
+                </span>
                 @endif
             </span>
-            <span class="flex-1 text-left text-sm font-medium in-data-flux-sidebar-collapsed-desktop:hidden">Notifications</span>
-            @if($unreadCount > 0)
-            <span class="shrink-0 min-w-5 h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-semibold leading-5 text-center tabular-nums in-data-flux-sidebar-collapsed-desktop:hidden">
-                {{ $unreadCount > 99 ? '99+' : $unreadCount }}
-            </span>
-            @endif
-        </button>
-        @endif
+        </flux:button>
 
         <flux:menu class="w-[340px] max-w-[90vw]">
             <div class="flex items-center justify-between px-3 py-2">
