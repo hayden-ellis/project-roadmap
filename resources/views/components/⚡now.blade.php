@@ -8,13 +8,17 @@ use App\Models\EpicComment;
 use App\Models\EpicPause;
 use App\Models\EpicQuarterPlan;
 use App\Models\Status;
+use App\Notifications\EpicCommented;
+use App\Notifications\EpicMentioned;
 use App\Services\CapacityService;
 use App\Support\ColumnOrder;
 use App\Support\DefaultSquad;
 use App\Support\Mentions;
 use App\Support\Quarter;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Livewire\Attributes\Computed;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Session;
 use Livewire\Component;
@@ -308,6 +312,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->syncEditFields($epic);
 
         $this->panel = $status->requires_reason ? 'pause' : null;
+
+        $this->refreshBoard();
     }
 
     /** Dismissing via Esc, the close button or a click outside flips the model. */
@@ -334,6 +340,22 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     public function setFlyoutTab(string $tab): void
     {
         $this->flyoutTab = in_array($tab, ['details', 'comments'], true) ? $tab : 'details';
+
+        // Reading the thread is what clears the card's "new for you" tint.
+        if ($this->flyoutTab === 'comments' && $this->openEpicId) {
+            $this->unreadCommentNotifications()
+                ->filter(fn ($notification) => (int) ($notification->data['epic_id'] ?? 0) === $this->openEpicId)
+                ->each->markAsRead();
+        }
+    }
+
+    /** Unread mention and reply notifications, the two kinds a comment sends. */
+    private function unreadCommentNotifications(): Collection
+    {
+        return Auth::user()
+            ->unreadNotifications()
+            ->whereIn('type', [EpicCommented::class, EpicMentioned::class])
+            ->get();
     }
 
     private function resetForms(): void
@@ -371,6 +393,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->validate(['editDescription' => 'nullable|string|max:65535']);
 
         $epic->update(['description' => $this->editDescription ?: null]);
+
+        $this->refreshBoard();
     }
 
     /** Writes this quarter's planned points onto the plan the flyout shows. */
@@ -393,6 +417,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->validate(['editTitle' => 'required|string|max:255'], ['editTitle.required' => 'Give it a name.']);
 
         $epic->update(['title' => $this->editTitle]);
+
+        $this->refreshBoard();
     }
 
     public function updatedEditCategoryId(): void
@@ -407,6 +433,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         }
 
         $epic->update(['category_id' => $categoryId]);
+
+        $this->refreshBoard();
     }
 
     public function updatedEditPriority(): void
@@ -417,6 +445,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->validate(['editPriority' => 'required|in:low,medium,high,critical']);
 
         $epic->update(['priority' => $this->editPriority]);
+
+        $this->refreshBoard();
     }
 
     public function updatedEditJiraEpicUrl(): void
@@ -430,6 +460,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         );
 
         $epic->update(['jira_epic_url' => trim($this->editJiraEpicUrl) ?: null]);
+
+        $this->refreshBoard();
     }
 
     public function updatedEditJpdIdeaUrl(): void
@@ -443,6 +475,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         );
 
         $epic->update(['jpd_idea_url' => trim($this->editJpdIdeaUrl) ?: null]);
+
+        $this->refreshBoard();
     }
 
     /**
@@ -497,6 +531,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 ]);
             }
         });
+
+        $this->refreshBoard();
     }
 
     // -------------------------------------------------------------- the board
@@ -529,6 +565,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         if ($changedColumn && $status->requires_reason) {
             $this->explain($epic->id);
         }
+
+        $this->refreshBoard();
     }
 
     /** Whether the squad filter lets this epic onto the board. */
@@ -599,6 +637,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             // Someone being put on it means the pause is over.
             $epic->pauses()->open()->update(['resumed_at' => now()]);
         });
+
+        $this->refreshBoard();
     }
 
     /**
@@ -645,6 +685,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
         $this->panel = null;
         $this->resetForms();
+        $this->refreshBoard();
     }
 
     /** Kept as the entry point the top-of-page prompt and its tests use. */
@@ -673,6 +714,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         });
 
         $this->panel = null;
+        $this->refreshBoard();
     }
 
     public function reopen(): void
@@ -688,6 +730,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 $epic->pauses()->open()->update(['resumed_at' => now()]);
             });
         }
+
+        $this->refreshBoard();
     }
 
     /** Takes one person off from this week forward, leaving their past weeks intact. */
@@ -697,6 +741,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->authorize('update', $epic);
 
         $this->clearFrom($epic, CapacityService::for(Auth::user()->currentTeam)->currentWeek(), $engineerId);
+
+        $this->refreshBoard();
     }
 
     // --------------------------------------------------------------- comments
@@ -830,14 +876,49 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             ->subWeeks(max(0, $quietWeeks - 1));
     }
 
+    /**
+     * What every render needs. Livewire runs with() again for each island it
+     * renders, so nothing costly is built here: the board and the flyout
+     * each pull their own data from a computed property, which only runs
+     * when the part of the page that reads it is being drawn.
+     */
     public function with(): array
+    {
+        return $this->shared;
+    }
+
+    /**
+     * Columns and pick-lists, drawn by both the board and the flyout.
+     * Computed so a full render, which visits with() twice (the page and
+     * the flyout island), still queries once.
+     */
+    #[Computed]
+    public function shared(): array
+    {
+        $team = Auth::user()->currentTeam;
+
+        return [
+            'statuses' => $this->orderedStatuses(),
+            'categories' => $team->categories()->ordered()->get(),
+            'squads' => $team->squads()->ordered()->get(),
+            'weekLabel' => CapacityService::for($team)->currentWeek()->format('M j'),
+            'quarterLabel' => Quarter::current()->label(),
+        ];
+    }
+
+    /**
+     * The board: every card sorted into its column, with the facts the grid
+     * adds. Only the page body reads this, so opening a card -- which
+     * renders just the flyout island -- never runs it.
+     */
+    #[Computed]
+    public function board(): array
     {
         $team = Auth::user()->currentTeam;
         $capacity = CapacityService::for($team);
-        $quarter = Quarter::current();
         $week = $capacity->currentWeek();
 
-        $statuses = $this->orderedStatuses();
+        $statuses = $this->shared['statuses'];
 
         // A remembered hidden column can outlive its status. Forget it, so
         // the count on the filter button never claims a ghost.
@@ -848,8 +929,17 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
         $epics = $team->epics()
             ->with(['category', 'status', 'quarterPlans.squad', 'pauses.supersededBy'])
+            ->withCount('comments')
             ->onBoard()
             ->get();
+
+        // Cards with conversation you have not caught up on yet: any unread
+        // comment notification that points at the epic. Status changes are
+        // news too, but not the kind a speech bubble should claim.
+        $unreadComments = $this->unreadCommentNotifications()
+            ->pluck('data.epic_id')
+            ->filter()
+            ->map(fn ($id) => (int) $id);
 
         $staffed = $capacity->staffedEpicIds();
 
@@ -860,7 +950,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             ->get()
             ->groupBy('epic_id');
 
-        $epics->each(function ($epic) use ($staffed, $quarter, $thisWeek) {
+        $epics->each(function ($epic) use ($staffed, $thisWeek, $unreadComments) {
             $epic->isStaffed = $staffed->contains($epic->id);
             $epic->crew = ($thisWeek[$epic->id] ?? collect())->pluck('engineer')->filter();
 
@@ -868,17 +958,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             // left edge, which survives every density.
             $epic->squad = $epic->quarterPlans->first()?->squad;
             $epic->flag = null;
+            $epic->unreadComments = $unreadComments->contains($epic->id);
+            $epic->openPause = $this->openPauseFor($epic);
 
-            $status = $epic->status;
-
-            // A pause only counts while the column still says "stopped". A
-            // record left open after the card moved on is history, not the
-            // present, so it never surfaces here.
-            $epic->openPause = $status?->requires_reason
-                ? $epic->pauses->whereNull('resumed_at')->sortByDesc('paused_at')->first()
-                : null;
-
-            if ($status?->is_complete && $epic->isStaffed) {
+            if ($epic->status?->is_complete && $epic->isStaffed) {
                 // Filed as finished, yet people are still booked on it.
                 $epic->flag = ['tone' => 'blue', 'label' => 'Still booked'];
             }
@@ -905,26 +988,39 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
         return [
             'columns' => $columns,
-            'statuses' => $statuses,
+            'unfiled' => $visible->whereNull('status_id')->values(),
             'filterCount' => ($this->squadFilter !== '' ? 1 : 0) + count($this->hiddenColumns),
             'customOrder' => ColumnOrder::isCustom(Auth::user(), $team),
-            'unfiled' => $visible->whereNull('status_id')->values(),
-            'weekLabel' => $week->format('M j'),
-            'quarterLabel' => $quarter->label(),
-            'candidateEpics' => $epics->sortBy('title')->values(),
-            'categories' => $team->categories()->ordered()->get(),
-            'squads' => $team->squads()->ordered()->get(),
-            ...$this->flyoutData($epics, $week),
         ];
     }
 
     /**
-     * Everything the flyout needs. Split out so with() stays readable and the
-     * work is skipped entirely while the flyout is closed.
+     * A pause only counts while the column still says "stopped". A record
+     * left open after the card moved on is history, not the present, so it
+     * never surfaces.
      */
-    private function flyoutData($epics, $week): array
+    private function openPauseFor(Epic $epic): ?EpicPause
     {
-        $epic = $this->openEpicId ? $epics->firstWhere('id', $this->openEpicId) : null;
+        return $epic->status?->requires_reason
+            ? $epic->pauses->whereNull('resumed_at')->sortByDesc('paused_at')->first()
+            : null;
+    }
+
+    /**
+     * Everything the flyout shows, and nothing the board does. Comments load
+     * only here -- the board never shows them, so the cost is paid only
+     * while the flyout is open.
+     */
+    #[Computed]
+    public function flyout(): array
+    {
+        $team = Auth::user()->currentTeam;
+
+        $epic = $this->openEpicId
+            ? $team->epics()
+                ->with(['status', 'quarterPlans', 'pauses.supersededBy', 'comments.user', 'comments.mentions'])
+                ->find($this->openEpicId)
+            : null;
 
         if (! $epic) {
             return [
@@ -937,15 +1033,17 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 'openReplies' => collect(),
                 'openCommentCount' => 0,
                 'mentionable' => collect(),
+                'candidateEpics' => collect(),
             ];
         }
 
-        // Comments load only here, not in the board query -- the board never
-        // shows them, so the cost is paid only while the flyout is open.
-        $epic->load(['comments.user', 'comments.mentions']);
+        $epic->openPause = $this->openPauseFor($epic);
+
+        $capacity = CapacityService::for($team);
+        $quarter = Quarter::current();
 
         $openCrew = Allocation::where('epic_id', $epic->id)
-            ->where('week_start', '>=', $week->toDateString())
+            ->where('week_start', '>=', $capacity->currentWeek()->toDateString())
             ->with('engineer.squad')
             ->get()
             ->groupBy('engineer_id')
@@ -958,15 +1056,13 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
         $crewIds = $openCrew->map(fn ($row) => $row['engineer']->id);
 
-        $quarter = Quarter::current();
-
         return [
             'openEpic' => $epic,
             'openCrew' => $openCrew,
             'openPlan' => $epic->quarterPlans
                 ->first(fn ($plan) => $plan->year === $quarter->year && $plan->quarter === $quarter->quarter),
-            'openStaffedPoints' => CapacityService::for(Auth::user()->currentTeam)->epicQuarterPoints($epic, $quarter),
-            'available' => Auth::user()->currentTeam->engineers()
+            'openStaffedPoints' => $capacity->epicQuarterPoints($epic, $quarter),
+            'available' => $team->engineers()
                 ->with('squad')->active()->ordered()->get()
                 ->reject(fn ($engineer) => $crewIds->contains($engineer->id))
                 ->values(),
@@ -974,13 +1070,32 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             'openReplies' => $epic->comments->whereNotNull('parent_id')->sortBy('created_at')->groupBy('parent_id'),
             'openCommentCount' => $epic->comments->count(),
             // Who the composer can @-mention: members with logins.
-            'mentionable' => Mentions::choices(Auth::user()->currentTeam),
+            'mentionable' => Mentions::choices($team),
+            // Where a pause can send the capacity. Only the pause form lists it.
+            'candidateEpics' => $this->panel === 'pause'
+                ? $team->epics()->onBoard()->get()->sortBy('title')->values()
+                : collect(),
         ];
+    }
+
+    /**
+     * An action fired from inside the flyout re-renders the flyout island
+     * and nothing else. When it changed what a card shows too, ask for the
+     * whole page instead.
+     */
+    private function refreshBoard(): void
+    {
+        $this->skipIslandsRender();
     }
 };
 ?>
 
 @php
+    // The board's own data: a computed property rather than part of with(),
+    // because with() runs again for every island render, and opening the
+    // flyout must not rebuild the board on the way.
+    ['columns' => $columns, 'unfiled' => $unfiled, 'filterCount' => $filterCount, 'customOrder' => $customOrder] = $this->board;
+
     $micro = 'text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-400 dark:text-zinc-500';
 
     $toneClasses = [
@@ -1092,7 +1207,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 @endforeach
             </div>
 
-            <flux:button size="sm" variant="primary" icon="plus" wire:click="newEpic">New epic</flux:button>
+            <flux:button size="sm" variant="primary" icon="plus" wire:island="flyout" wire:click="newEpic"
+                         x-on:click="$wire.showFlyout = true">New epic</flux:button>
         </div>
     </div>
 
@@ -1172,7 +1288,6 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                     @php
                         $squadColor = $epic->squad->color ?? '#a1a1aa';
                         $faces = $density === 'compact' ? 3 : 5;
-                        $faceSize = $density === 'compact' ? 'size-5' : 'size-6';
                     @endphp
 
                     {{-- The left edge is the squad, at every density. It costs no
@@ -1186,20 +1301,30 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                          fallbackTolerance above -- below it nothing dragged,
                          at it the press became a drag. Keyboard activation
                          (detail 0) always opens. --}}
+                    {{-- The panel slides out at once, onto a placeholder,
+                         and the call is aimed at the flyout island so the
+                         reply carries the flyout and not the whole board. --}}
                     <article x-sort:item="{{ $epic->id }}" wire:key="card-{{ $epic->id }}"
                              x-data="{ downX: 0, downY: 0 }"
                              x-on:pointerdown="downX = $event.clientX; downY = $event.clientY"
-                             x-on:click="($event.detail === 0 || Math.hypot($event.clientX - downX, $event.clientY - downY) < 5) && $wire.open({{ $epic->id }})"
+                             x-on:click="if ($event.detail === 0 || Math.hypot($event.clientX - downX, $event.clientY - downY) < 5) { $wire.showFlyout = true; $wire.$island('flyout').open({{ $epic->id }}) }"
                              class="group relative overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900
                                     cursor-pointer select-none hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors
-                                    {{ $density === 'compact' ? 'pl-3 pr-2.5 py-2' : 'pl-3.5 pr-3 py-2.5' }}">
+                                    {{ $density === 'compact' ? 'pl-3 pr-2.5 py-2' : 'pl-3.5 pr-3 pt-1.5 pb-2.5' }}">
 
                         <span class="absolute inset-y-0 left-0 w-1" style="background-color: {{ $squadColor }}"
                               @if($epic->squad) title="{{ $epic->squad->name }}" @endif></span>
 
+                        {{-- Every card in a column is the same height. Each
+                             region below reserves its room whether or not it
+                             has anything to say, and nothing is allowed to
+                             wrap onto a second line except the title, which
+                             is clamped and padded to exactly two. --}}
+
                         @if($density === 'compact')
-                        {{-- One line. Title and faces, nothing else. --}}
-                        <div class="flex items-center gap-2">
+                        {{-- One line. Title and faces, nothing else. The row
+                             is as tall as a face even when there are none. --}}
+                        <div class="flex items-center gap-2 min-h-6">
                             @if($epic->flag)
                             <span class="size-1.5 rounded-full shrink-0 {{ $flagDot[$epic->flag['tone']] }}"
                                   title="{{ $epic->flag['label'] }}"></span>
@@ -1213,15 +1338,20 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                 {{ $epic->title }}
                             </button>
 
+                            {{-- Compact has no room for a count that is
+                                 merely true; it shows only when the thread
+                                 has something new for you. --}}
+                            @if($epic->unreadComments)
+                            <x-card-comments :count="$epic->comments_count" unread />
+                            @endif
+
                             @if($epic->crew->isNotEmpty())
                             <div class="flex -space-x-1.5 shrink-0">
                                 @foreach($epic->crew->take($faces) as $engineer)
-                                <x-engineer-avatar :engineer="$engineer" :size="$density === 'compact' ? 'xs' : 'sm'"
-                                                   class="ring-2 ring-white dark:ring-zinc-900" />
+                                <x-engineer-avatar :engineer="$engineer" size="xs" class="ring-2 ring-white dark:ring-zinc-900" />
                                 @endforeach
                                 @if($epic->crew->count() > $faces)
-                                <flux:avatar circle :size="$density === 'compact' ? 'xs' : 'sm'"
-                                             class="ring-2 ring-white dark:ring-zinc-900"
+                                <flux:avatar circle size="xs" class="ring-2 ring-white dark:ring-zinc-900"
                                              :tooltip="$epic->crew->skip($faces)->pluck('name')->implode(', ')">
                                     +{{ $epic->crew->count() - $faces }}
                                 </flux:avatar>
@@ -1231,90 +1361,102 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                         </div>
 
                         @else
-                        {{-- No handler of its own: the click bubbles to the
-                             card's drag-aware one. The button stays for focus
-                             and keyboard reach. --}}
-                        <button type="button"
-                                class="block w-full text-left text-[13px] font-medium leading-snug text-zinc-900 dark:text-zinc-100 cursor-pointer">
+                        {{-- Header band: whose it is on the left; the Jira key,
+                             priority and any flag on the right. The squad
+                             name gives way first if the two sides meet. --}}
+                        <div class="flex items-center justify-between gap-2 h-4">
+                            @if($epic->squad)
+                            <span class="inline-flex items-center gap-1.5 min-w-0 text-[10px] font-semibold" style="color: {{ $squadColor }}">
+                                <span class="size-1.5 rounded-full shrink-0" style="background-color: {{ $squadColor }}"></span>
+                                <span class="truncate">{{ $epic->squad->name }}</span>
+                            </span>
+                            @else
+                            <span class="text-[10px] font-medium text-zinc-400 dark:text-zinc-500 truncate">No squad</span>
+                            @endif
+
+                            <span class="inline-flex items-center gap-1.5 shrink-0 h-4">
+                                @if($epic->flag)
+                                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold {{ $toneClasses[$epic->flag['tone']] }}">
+                                    <flux:icon.exclamation-circle variant="micro" class="size-3" />
+                                    {{ $epic->flag['label'] }}
+                                </span>
+                                @endif
+
+                                {{-- click.stop inside the chip keeps a jump to
+                                     Jira from also opening the flyout. --}}
+                                @if($epic->jira_epic_url)
+                                <x-atlassian-link :url="$epic->jira_epic_url" kind="jira" />
+                                @endif
+                                @if($epic->jpd_idea_url)
+                                <x-atlassian-link :url="$epic->jpd_idea_url" kind="idea" />
+                                @endif
+
+                                <x-priority-icon :priority="$epic->priority" />
+                            </span>
+                        </div>
+
+                        {{-- Two lines, always: a one-line title leaves the
+                             second line blank rather than pulling the footer
+                             up. No handler of its own -- the click bubbles to
+                             the card's drag-aware one. --}}
+                        <button type="button" title="{{ $epic->title }}"
+                                class="block w-full mt-0.5 text-left text-[13px] font-medium leading-tight line-clamp-2 min-h-[2.5em] text-zinc-900 dark:text-zinc-100 cursor-pointer">
                             {{ $epic->title }}
                         </button>
 
-                        @if($density === 'detailed' && filled($epic->description))
-                        <p class="mt-1.5 text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400 line-clamp-2">
-                            {{ $epic->description }}
+                        @if($density === 'detailed')
+                        <p class="mt-1 text-[11px] leading-snug line-clamp-2 min-h-[2.75em]
+                                  {{ filled($epic->description) ? 'text-zinc-500 dark:text-zinc-400' : 'italic text-zinc-400 dark:text-zinc-500' }}">
+                            {{ filled($epic->description) ? $epic->description : 'No description' }}
                         </p>
                         @endif
 
-                        <div class="flex flex-wrap items-center gap-1.5 mt-1.5">
-                            @if($epic->squad)
-                            <span class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded font-medium"
-                                  style="background-color: {{ $squadColor }}1f; color: {{ $squadColor }}">
-                                <span class="size-1.5 rounded-full" style="background-color: {{ $squadColor }}"></span>
-                                {{ $epic->squad->name }}
-                            </span>
-                            @endif
-
-                            @if($epic->category)
-                            <span class="text-[10px] px-1.5 py-0.5 rounded font-medium"
-                                  style="background-color: {{ $epic->category->color }}20; color: {{ $epic->category->color }}">
-                                {{ $epic->category->name }}
-                            </span>
-                            @endif
-
-                            <x-priority-icon :priority="$epic->priority" />
-
-                            {{-- click.stop inside the chip keeps a jump to
-                                 Jira from also opening the flyout. --}}
-                            @if($epic->jira_epic_url)
-                            <x-atlassian-link :url="$epic->jira_epic_url" kind="jira" />
-                            @endif
-                            @if($epic->jpd_idea_url)
-                            <x-atlassian-link :url="$epic->jpd_idea_url" kind="idea" />
-                            @endif
-                        </div>
-
-                        {{-- Who is actually on it this week -- the one fact a
-                             manual column cannot fake. --}}
-                        <div class="mt-2.5">
+                        {{-- Footer: who is actually on it this week on the
+                             left -- the one fact a manual column cannot fake
+                             -- and the category on the right, on its own so
+                             it is never mistaken for the squad. --}}
+                        <div class="mt-1.5 flex items-center justify-between gap-2 min-h-8">
                             @if($epic->crew->isEmpty())
-                            <span class="text-[11px] text-zinc-400">No one assigned</span>
-
-                            @elseif($density === 'detailed')
-                            <div class="flex flex-wrap gap-1">
-                                @foreach($epic->crew as $engineer)
-                                <span class="inline-flex items-center gap-1.5 pl-0.5 pr-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800">
-                                    <x-engineer-avatar :engineer="$engineer" size="xs" :tooltip="false" />
-                                    <span class="text-[11px] text-zinc-600 dark:text-zinc-300">{{ $engineer->name }}</span>
-                                </span>
-                                @endforeach
-                            </div>
-
+                            <span class="inline-flex items-center gap-1.5 min-w-0 text-[11px] text-zinc-400 dark:text-zinc-500">
+                                <span class="size-8 rounded-full border border-dashed border-zinc-300 dark:border-zinc-600 shrink-0"></span>
+                                <span class="truncate">No one assigned</span>
+                            </span>
                             @else
-                            <div class="flex -space-x-1.5">
+                            {{-- Faces only, at every density; the name is a
+                                 hover away and the row never has to wrap. --}}
+                            <div class="flex -space-x-1.5 min-w-0">
                                 @foreach($epic->crew->take($faces) as $engineer)
-                                <x-engineer-avatar :engineer="$engineer" :size="$density === 'compact' ? 'xs' : 'sm'"
-                                                   class="ring-2 ring-white dark:ring-zinc-900" />
+                                <x-engineer-avatar :engineer="$engineer" size="sm" class="ring-2 ring-white dark:ring-zinc-900" />
                                 @endforeach
                                 @if($epic->crew->count() > $faces)
-                                <flux:avatar circle :size="$density === 'compact' ? 'xs' : 'sm'"
-                                             class="ring-2 ring-white dark:ring-zinc-900"
+                                <flux:avatar circle size="sm" class="ring-2 ring-white dark:ring-zinc-900"
                                              :tooltip="$epic->crew->skip($faces)->pluck('name')->implode(', ')">
                                     +{{ $epic->crew->count() - $faces }}
                                 </flux:avatar>
                                 @endif
                             </div>
                             @endif
-                        </div>
 
-                        @if($epic->flag)
-                        <div class="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
-                            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold
-                                         {{ $toneClasses[$epic->flag['tone']] }}">
-                                <flux:icon.exclamation-circle variant="micro" class="size-3" />
-                                {{ $epic->flag['label'] }}
+                            {{-- The tags cluster: how much has been said,
+                                 then what kind of work it is. --}}
+                            <span class="inline-flex items-center gap-2.5 shrink-0">
+                                @if($epic->comments_count > 0 || $epic->unreadComments)
+                                <x-card-comments :count="$epic->comments_count" :unread="$epic->unreadComments" />
+                                @endif
+
+                                @if($epic->category)
+                                <span class="inline-flex items-center gap-1 text-[10px] font-medium" style="color: {{ $epic->category->color }}">
+                                    <flux:icon.tag variant="micro" class="size-3" />
+                                    {{ $epic->category->name }}
+                                </span>
+                                @else
+                                <span class="inline-flex items-center gap-1 text-[10px] text-zinc-400 dark:text-zinc-500">
+                                    <flux:icon.tag variant="micro" class="size-3" />
+                                    No category
+                                </span>
+                                @endif
                             </span>
                         </div>
-                        @endif
                         @endif
                     </article>
                     @endforeach
@@ -1325,7 +1467,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                      for a slot; the flyout opens with this status (and any
                      squad filter) already picked. --}}
                 <div class="px-2 pb-2">
-                    <button type="button" wire:click="newEpic({{ $status->id }})"
+                    <button type="button" wire:island="flyout" wire:click="newEpic({{ $status->id }})"
+                            x-on:click="$wire.showFlyout = true"
                             class="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700
                                    {{ $density === 'compact' ? 'py-2' : 'py-2.5' }}
                                    text-[13px] font-medium text-zinc-400 dark:text-zinc-500 cursor-pointer transition-colors
@@ -1344,7 +1487,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 <div class="{{ $micro }} mb-2">No status</div>
                 <div class="space-y-2">
                     @foreach($unfiled as $epic)
-                    <button type="button" wire:click="open({{ $epic->id }})" wire:key="unfiled-{{ $epic->id }}"
+                    <button type="button" wire:island="flyout" wire:click="open({{ $epic->id }})" wire:key="unfiled-{{ $epic->id }}"
+                            x-on:click="$wire.showFlyout = true"
                             class="block w-full text-left rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2.5 text-[13px] font-medium hover:underline">
                         {{ $epic->title }}
                     </button>
@@ -1362,6 +1506,26 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     {{-- A hard width, not a min: the dialog element sizes to fit its content,
          so anything one-line-long (a pause note, a wide grid) would otherwise
          drag the panel across the screen. --}}
+    {{-- An island, so that anything done in here -- opening, typing, a
+         comment, a tab -- re-renders this panel and not the board behind
+         it. Actions that change a card call refreshBoard() to opt back into
+         the full page. `always` keeps it in every full render too, so a
+         drag that lands in a "why?" column still opens the pause form. --}}
+    @island('flyout', always: true)
+    @php
+        // An island compiles to a view of its own, so the page's @php block
+        // is out of reach: the one style it shares is restated, and its data
+        // comes from the flyout computed property (see with()).
+        $micro = 'text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-400 dark:text-zinc-500';
+
+        [
+            'openEpic' => $openEpic, 'openCrew' => $openCrew, 'openPlan' => $openPlan,
+            'openStaffedPoints' => $openStaffedPoints, 'available' => $available,
+            'openComments' => $openComments, 'openReplies' => $openReplies,
+            'openCommentCount' => $openCommentCount, 'mentionable' => $mentionable,
+            'candidateEpics' => $candidateEpics,
+        ] = $this->flyout;
+    @endphp
     <flux:modal variant="flyout" wire:model="showFlyout" class="w-full max-w-md! p-6!">
         @if($creating)
         <form wire:submit="createEpic" class="space-y-6">
@@ -1787,6 +1951,16 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 </div>
             </div>
         </div>
+        @else
+        {{-- What the panel opens onto in the moment between the click and
+             the epic arriving: the shape of the header above, in grey. --}}
+        <div class="animate-pulse space-y-3 pr-8" aria-hidden="true">
+            <div class="h-6 w-24 rounded-full bg-zinc-200 dark:bg-zinc-700"></div>
+            <div class="mt-3 h-7 w-3/4 rounded bg-zinc-200 dark:bg-zinc-700"></div>
+            <div class="h-4 w-full rounded bg-zinc-100 dark:bg-zinc-800"></div>
+            <div class="h-4 w-5/6 rounded bg-zinc-100 dark:bg-zinc-800"></div>
+        </div>
         @endif
     </flux:modal>
+    @endisland
 </div>

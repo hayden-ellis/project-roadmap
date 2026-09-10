@@ -1,5 +1,9 @@
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" class="dark">
+{{-- The theme class comes from the cookie the head script keeps, so the
+     page is born in the right theme and wire:navigate has nothing to flip.
+     A first visit has no cookie and renders light; the head script sets
+     the class before anything paints. --}}
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" @class(['dark' => request()->cookie('appearance') === 'dark'])>
 
 <head>
     @include('partials.head')

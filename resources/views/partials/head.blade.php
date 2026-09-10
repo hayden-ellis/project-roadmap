@@ -14,3 +14,28 @@
 <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/sort@3.x.x/dist/cdn.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/mask@3.x.x/dist/cdn.min.js"></script>
 @fluxAppearance
+
+{{-- Flux keeps the light/dark choice in localStorage, which the server
+     cannot read. Without help every page would arrive as one theme and be
+     corrected on the client, and wire:navigate copies the html attributes
+     across before Flux runs again -- so anything with a colour transition
+     animates the round trip as a flicker. Mirror the resolved choice into
+     a cookie and the layout can render the right class to begin with.
+     Installed here, before Alpine boots, because Flux captures
+     applyAppearance at alpine:init. --}}
+<script>
+    (() => {
+        const apply = window.Flux.applyAppearance
+
+        const remember = () => {
+            const mode = document.documentElement.classList.contains('dark') ? 'dark' : 'light'
+            const secure = location.protocol === 'https:' ? '; Secure' : ''
+
+            document.cookie = `appearance=${mode}; path=/; max-age=31536000; SameSite=Lax${secure}`
+        }
+
+        window.Flux.applyAppearance = (appearance) => { apply(appearance); remember() }
+
+        remember()
+    })()
+</script>

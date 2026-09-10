@@ -69,19 +69,26 @@ beforeEach(function () {
     $this->actingAs($user);
 });
 
+/**
+ * The columns as last rendered. They live on a computed property rather
+ * than in the view data, so that the flyout can render without them.
+ *
+ * @return \Illuminate\Support\Collection<int, array{status: Status, epics: \Illuminate\Support\Collection}>
+ */
+function columns($component)
+{
+    return collect($component->instance()->board['columns']);
+}
+
 /** @return \Illuminate\Support\Collection<int, Epic> */
 function column($component, Status $status)
 {
-    return collect($component->viewData('columns'))
-        ->firstWhere(fn ($c) => $c['status']->id === $status->id)['epics'];
+    return columns($component)->firstWhere(fn ($c) => $c['status']->id === $status->id)['epics'];
 }
 
 it('builds a column for every status, in the order they are set', function () {
-    Livewire::test('now')->assertViewHas(
-        'columns',
-        fn ($columns) => collect($columns)->pluck('status.name')->all()
-            === ['Backlog', 'In progress', 'Paused', 'Shipped'],
-    );
+    expect(columns(Livewire::test('now'))->pluck('status.name')->all())
+        ->toBe(['Backlog', 'In progress', 'Paused', 'Shipped']);
 });
 
 it('files each epic in the column it was put in', function () {
@@ -188,12 +195,11 @@ describe('hiding columns', function () {
     it('stops drawing a hidden column, and brings it back when toggled again', function () {
         $component = Livewire::test('now')->call('toggleColumn', $this->paused->id);
 
-        $component->assertViewHas('columns', fn ($columns) => collect($columns)->pluck('status.name')->all()
-            === ['Backlog', 'In progress', 'Shipped']);
+        expect(columns($component)->pluck('status.name')->all())->toBe(['Backlog', 'In progress', 'Shipped']);
 
         $component->call('toggleColumn', $this->paused->id);
 
-        $component->assertViewHas('columns', fn ($columns) => count($columns) === 4);
+        expect(columns($component))->toHaveCount(4);
     });
 
     it('leaves the epics in a hidden column alone', function () {
@@ -212,7 +218,7 @@ describe('hiding columns', function () {
 
         expect($component->get('hiddenColumns'))->toBe([]);
 
-        $component->assertViewHas('columns', fn ($columns) => count($columns) === 4);
+        expect(columns($component))->toHaveCount(4);
     });
 
     it('offers the way back when every column is hidden', function () {
@@ -230,7 +236,7 @@ describe('hiding columns', function () {
 
         expect($component->get('hiddenColumns'))->toBe([]);
 
-        $component->assertViewHas('columns', fn ($columns) => count($columns) === 4);
+        expect(columns($component))->toHaveCount(4);
     });
 
     it('refuses to hide another team\'s column', function () {
@@ -324,7 +330,7 @@ describe('flagging what does not match the grid', function () {
         ($this->staff)($epic, $this->currentWeek->subWeeks(4));
 
         Livewire::test('now')
-            ->assertViewHas('columns', fn ($c) => $boardEpics($c)->firstWhere('id', $epic->id)?->flag === null)
+            ->tap(fn ($c) => expect($boardEpics(columns($c))->firstWhere('id', $epic->id)?->flag)->toBeNull())
             ->assertDontSee('Quiet 4w');
     });
 
@@ -333,7 +339,7 @@ describe('flagging what does not match the grid', function () {
         ($this->makeEpic)('Wallet Top-ups');
 
         Livewire::test('now')
-            ->assertViewHas('columns', fn ($c) => $boardEpics($c)->every(fn ($e) => $e->flag === null));
+            ->tap(fn ($c) => expect($boardEpics(columns($c))->every(fn ($e) => $e->flag === null))->toBeTrue());
     });
 
     it('leaves actively staffed work alone', function () use ($boardEpics) {
@@ -341,7 +347,7 @@ describe('flagging what does not match the grid', function () {
         ($this->staff)($epic);
 
         Livewire::test('now')
-            ->assertViewHas('columns', fn ($c) => $boardEpics($c)->every(fn ($e) => $e->flag === null));
+            ->tap(fn ($c) => expect($boardEpics(columns($c))->every(fn ($e) => $e->flag === null))->toBeTrue());
     });
 
     it('flags a finished epic that people are still booked on', function () use ($boardEpics) {
@@ -349,7 +355,7 @@ describe('flagging what does not match the grid', function () {
         ($this->staff)($epic);
 
         Livewire::test('now')
-            ->assertViewHas('columns', fn ($c) => $boardEpics($c)->firstWhere('id', $epic->id)?->flag !== null)
+            ->tap(fn ($c) => expect($boardEpics(columns($c))->firstWhere('id', $epic->id)?->flag)->not->toBeNull())
             ->assertSee('Still booked');
     });
 
@@ -358,7 +364,7 @@ describe('flagging what does not match the grid', function () {
         $epic = ($this->makeEpic)('PSD2 Compliance', $this->paused);
 
         Livewire::test('now')
-            ->assertViewHas('columns', fn ($c) => $boardEpics($c)->every(fn ($e) => $e->flag === null));
+            ->tap(fn ($c) => expect($boardEpics(columns($c))->every(fn ($e) => $e->flag === null))->toBeTrue());
     });
 });
 
@@ -840,7 +846,7 @@ describe('work actions', function () {
 
         Livewire::test('now')
             ->call('open', $epic->id)
-            ->assertViewHas('openEpic', fn ($e) => $e->openPause === null)
+            ->tap(fn ($c) => expect($c->instance()->flyout['openEpic']->openPause)->toBeNull())
             ->assertDontSee('Deprioritised for the scheduler launch');
     });
 

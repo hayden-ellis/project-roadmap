@@ -24,7 +24,9 @@ beforeEach(function () {
 
     $this->actingAs($this->user);
 
-    $this->columnIds = fn ($component) => $component->viewData('columns')->map(fn ($c) => $c['status']->id)->all();
+    // The columns live on a computed property, not the view data, so that
+    // the flyout can render without them.
+    $this->columnIds = fn ($component) => collect($component->instance()->board['columns'])->map(fn ($c) => $c['status']->id)->all();
 });
 
 test('a user who has never dragged sees the team order', function () {
@@ -112,11 +114,11 @@ test('a drop position counts visible columns only, and hidden ones keep their pl
 test('resetting returns to the team order and forgets the row', function () {
     $component = Livewire::test('now')->call('moveColumn', $this->shipped->id, 0);
 
-    expect($component->viewData('customOrder'))->toBeTrue();
+    expect($component->instance()->board['customOrder'])->toBeTrue();
 
     $component->call('resetColumnOrder');
 
-    expect($component->viewData('customOrder'))->toBeFalse()
+    expect($component->instance()->board['customOrder'])->toBeFalse()
         ->and(($this->columnIds)($component))
         ->toBe([$this->backlog->id, $this->doing->id, $this->paused->id, $this->shipped->id])
         ->and(UserColumnOrder::count())->toBe(0);

@@ -62,7 +62,7 @@ it('shows an epic\'s comments in the flyout', function () {
         ->assertSet('flyoutTab', 'details')
         ->call('setFlyoutTab', 'comments')
         ->assertSee('Vendor confirmed the fix ships Friday.')
-        ->assertViewHas('openComments', fn ($comments) => $comments->count() === 1);
+        ->tap(fn ($c) => expect($c->instance()->flyout['openComments'])->toHaveCount(1));
 });
 
 it('adds a comment to the open epic', function () {
