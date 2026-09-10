@@ -161,21 +161,6 @@ it('filters the matrix to the selected quarter', function () {
         ->not->toContain($later->id);
 });
 
-it('quick-adds an epic from the bar', function () {
-    Livewire::test('matrix')
-        ->set('newTitle', 'Payments List View')
-        ->set('newPriority', 'high')
-        ->call('quickAdd')
-        ->assertHasNoErrors()
-        ->assertSet('newTitle', '');
-
-    $epic = $this->team->epics()->where('title', 'Payments List View')->first();
-
-    expect($epic)->not->toBeNull()
-        ->and($epic->importance)->toBe('high')
-        ->and($epic->urgency)->toBe('not_urgent');
-});
-
 it('will not move an epic belonging to another team', function () {
     $stranger = User::factory()->withPersonalTeam()->create();
 
@@ -197,4 +182,48 @@ it('rejects a quadrant that does not exist', function () {
     Livewire::test('matrix')
         ->call('moveEpic', $epic->id, 0, 'high/sideways')
         ->assertStatus(400);
+});
+
+it('searches the matrix by title, case-insensitively', function () {
+    $scheduler = ($this->makeEpic)('Smart Charging Scheduler', 'critical');
+    $other = ($this->makeEpic)('Billing Export', 'critical');
+
+    $component = Livewire::test('matrix')->set('search', 'SCHED');
+
+    expect(quadrant($component, 'high/urgent')->pluck('id'))
+        ->toContain($scheduler->id)
+        ->not->toContain($other->id);
+});
+
+it('searches the matrix by Jira key', function () {
+    $keyed = ($this->makeEpic)('Keyed', 'critical', ['jira_epic_url' => 'https://acme.atlassian.net/browse/PLAT-42']);
+    $other = ($this->makeEpic)('Other', 'critical');
+
+    $component = Livewire::test('matrix')->set('search', 'plat-42');
+
+    expect(quadrant($component, 'high/urgent')->pluck('id'))
+        ->toContain($keyed->id)
+        ->not->toContain($other->id);
+});
+
+it('drops one filter from its chip and clears search with the filters', function () {
+    $charging = Squad::create(['team_id' => $this->team->id, 'name' => 'Charging', 'color' => '#EF4444']);
+    $billing = Squad::create(['team_id' => $this->team->id, 'name' => 'Billing', 'color' => '#3B82F6']);
+
+    $component = Livewire::test('matrix')
+        ->set('selectedSquadIds', [$charging->id, $billing->id])
+        ->set('selectedQuarter', '2026-Q3')
+        ->set('search', 'x')
+        ->call('removeFilter', 'selectedSquadIds', (string) $billing->id);
+
+    expect($component->get('selectedSquadIds'))->toBe([$charging->id]);
+
+    $component->call('removeFilter', 'selectedQuarter', '');
+
+    expect($component->get('selectedQuarter'))->toBe('');
+
+    $component->call('clearSearchAndFilters');
+
+    expect($component->get('search'))->toBe('')
+        ->and($component->get('selectedSquadIds'))->toBe([]);
 });

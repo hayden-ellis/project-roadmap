@@ -387,7 +387,9 @@ describe('the flyout', function () {
     it('binds the flyout to a property flux actually reads', function () {
         $html = Livewire::test('now')->html();
 
-        expect($html)->toMatch('/wire:model(\.self)?="showFlyout"/');
+        // .live so a dismissal reaches the server at once (see the modal's
+        // comment); Flux appends .self to whatever it is given.
+        expect($html)->toMatch('/wire:model(\.live)?(\.self)?="showFlyout"/');
     });
 
     it('clears the open epic when dismissed', function () {

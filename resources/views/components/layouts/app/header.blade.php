@@ -23,8 +23,11 @@
         <x-app-logo :href="route('now')" :responsive="true" wire:navigate />
 
         {{-- -mb-px drops the navbar a hair so a current item's underline
-             lands on the header's own border rather than floating above it. --}}
-        <flux:navbar class="-mb-px max-lg:hidden" data-test="primary-nav">
+             lands on the header's own border rather than floating above it.
+             Seven items with icons need about 1280px alongside the brand and
+             the right-hand cluster; between lg and xl the icons go and the
+             labels alone fit. --}}
+        <flux:navbar class="-mb-px max-lg:hidden max-xl:[&_svg]:hidden" data-test="primary-nav">
             @foreach ($navItems as $item)
                 @if (isset($item['children']))
                     <flux:dropdown>

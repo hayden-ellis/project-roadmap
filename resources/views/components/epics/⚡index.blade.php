@@ -8,6 +8,7 @@ use App\Support\Quarter;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 
@@ -43,6 +44,10 @@ new #[Layout('components.layouts.app.header')] class extends Component
         $this->selectedStatusIds = [];
         $this->selectedCategoryIds = [];
     }
+
+    /** The shared Add epic modal just created one; re-render to list it. */
+    #[On('epic-added')]
+    public function refresh(): void {}
 
     public function clearSearchAndFilters(): void
     {
@@ -211,7 +216,9 @@ new #[Layout('components.layouts.app.header')] class extends Component
             <h1>Epics</h1>
             <flux:text class="mt-1">Points shown for {{ $quarter->label() }}</flux:text>
         </div>
-        <flux:button href="/epics/create" icon="plus" wire:navigate class="w-full sm:w-auto">Create Epic</flux:button>
+        <flux:modal.trigger name="add-epic">
+            <flux:button icon="plus" variant="primary" class="w-full sm:w-auto">Add epic</flux:button>
+        </flux:modal.trigger>
     </div>
 
     @php
@@ -372,7 +379,9 @@ new #[Layout('components.layouts.app.header')] class extends Component
             @if($narrowed)
             <flux:button variant="ghost" class="mt-6" wire:click="clearSearchAndFilters">Clear search and filters</flux:button>
             @else
-            <flux:button href="/epics/create" variant="primary" class="mt-6" wire:navigate>Create Epic</flux:button>
+            <flux:modal.trigger name="add-epic">
+                <flux:button variant="primary" class="mt-6">Add epic</flux:button>
+            </flux:modal.trigger>
             @endif
         </div>
     </flux:card>
@@ -574,4 +583,6 @@ new #[Layout('components.layouts.app.header')] class extends Component
         </table>
     </div>
     @endif
+
+    <livewire:quick-add-epic />
 </div>

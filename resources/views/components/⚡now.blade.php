@@ -1123,7 +1123,10 @@ new #[Layout('components.layouts.app.header')] class extends Component
 @endphp
 
 {{-- Poll so the board follows the team without a reload. Livewire pauses this in background tabs. --}}
-<div wire:poll.30s>
+{{-- `opening` is set by whatever opens the panel and cleared by the content
+     that arrives (see the keyed x-init inside the flyout). It lives on the
+     root so the cards and the island can both reach it. --}}
+<div wire:poll.30s x-data="{ opening: false }">
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6">
         <div>
             <h1>Now</h1>
@@ -1208,7 +1211,7 @@ new #[Layout('components.layouts.app.header')] class extends Component
             </div>
 
             <flux:button size="sm" variant="primary" icon="plus" wire:island="flyout" wire:click="newEpic"
-                         x-on:click="$wire.showFlyout = true">New epic</flux:button>
+                         x-on:click="opening = true; $wire.showFlyout = true">New epic</flux:button>
         </div>
     </div>
 
@@ -1307,7 +1310,7 @@ new #[Layout('components.layouts.app.header')] class extends Component
                     <article x-sort:item="{{ $epic->id }}" wire:key="card-{{ $epic->id }}"
                              x-data="{ downX: 0, downY: 0 }"
                              x-on:pointerdown="downX = $event.clientX; downY = $event.clientY"
-                             x-on:click="if ($event.detail === 0 || Math.hypot($event.clientX - downX, $event.clientY - downY) < 5) { $wire.showFlyout = true; $wire.$island('flyout').open({{ $epic->id }}) }"
+                             x-on:click="if ($event.detail === 0 || Math.hypot($event.clientX - downX, $event.clientY - downY) < 5) { opening = true; $wire.showFlyout = true; $wire.$island('flyout').open({{ $epic->id }}) }"
                              class="group relative overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900
                                     cursor-pointer select-none hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors
                                     {{ $density === 'compact' ? 'pl-3 pr-2.5 py-2' : 'pl-3.5 pr-3 pt-1.5 pb-2.5' }}">
@@ -1468,7 +1471,7 @@ new #[Layout('components.layouts.app.header')] class extends Component
                      squad filter) already picked. --}}
                 <div class="px-2 pb-2">
                     <button type="button" wire:island="flyout" wire:click="newEpic({{ $status->id }})"
-                            x-on:click="$wire.showFlyout = true"
+                            x-on:click="opening = true; $wire.showFlyout = true"
                             class="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700
                                    {{ $density === 'compact' ? 'py-2' : 'py-2.5' }}
                                    text-[13px] font-medium text-zinc-400 dark:text-zinc-500 cursor-pointer transition-colors
@@ -1488,7 +1491,7 @@ new #[Layout('components.layouts.app.header')] class extends Component
                 <div class="space-y-2">
                     @foreach($unfiled as $epic)
                     <button type="button" wire:island="flyout" wire:click="open({{ $epic->id }})" wire:key="unfiled-{{ $epic->id }}"
-                            x-on:click="$wire.showFlyout = true"
+                            x-on:click="opening = true; $wire.showFlyout = true"
                             class="block w-full text-left rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2.5 text-[13px] font-medium hover:underline">
                         {{ $epic->title }}
                     </button>
@@ -1526,9 +1529,19 @@ new #[Layout('components.layouts.app.header')] class extends Component
             'candidateEpics' => $candidateEpics,
         ] = $this->flyout;
     @endphp
-    <flux:modal variant="flyout" wire:model="showFlyout" class="w-full max-w-md! p-6!">
+    {{-- .live, because a plain wire:model only queues the close for the
+         next request. Until then the server still thinks the last epic is
+         open, so the next card would open onto it. --}}
+    <flux:modal variant="flyout" wire:model.live="showFlyout" class="w-full max-w-md! p-6!">
+        {{-- Whatever was here last is hidden from the click until the next
+             epic arrives, so the panel never opens onto the previous one.
+             wire:loading would not do: an open queued behind an in-flight
+             close is not "loading" yet. The reset sits on the content
+             itself, keyed, so it runs only when something new has landed
+             -- an empty close render leaves the placeholder up. --}}
+        <div x-show="!opening">
         @if($creating)
-        <form wire:submit="createEpic" class="space-y-6">
+        <form wire:submit="createEpic" class="space-y-6" wire:key="flyout-new" x-init="opening = false">
             <div>
                 <flux:heading size="lg">New epic</flux:heading>
                 <flux:text class="mt-1">Capture it now, fill in the detail later.</flux:text>
@@ -1596,7 +1609,7 @@ new #[Layout('components.layouts.app.header')] class extends Component
         {{-- min-height is the viewport minus the modal's p-6, so mt-auto can
              pin the move rail to the bottom edge even when content is short.
              (min-h-full has nothing to resolve against inside the dialog.) --}}
-        <div class="flex min-h-[calc(100dvh-3rem)] flex-col">
+        <div class="flex min-h-[calc(100dvh-3rem)] flex-col" wire:key="flyout-{{ $openEpic->id }}" x-init="opening = false">
             {{-- Identity. Every field here writes as it changes; the full page
                  is only needed for dates and the week spine. The close button
                  owns the top-right corner, so the badge row leaves it alone. --}}
@@ -1951,16 +1964,17 @@ new #[Layout('components.layouts.app.header')] class extends Component
                 </div>
             </div>
         </div>
-        @else
-        {{-- What the panel opens onto in the moment between the click and
-             the epic arriving: the shape of the header above, in grey. --}}
-        <div class="animate-pulse space-y-3 pr-8" aria-hidden="true">
+        @endif
+        </div>
+
+        {{-- What the panel opens onto while the epic is on its way: the
+             shape of the header above, in grey. --}}
+        <div x-show="opening" x-cloak class="animate-pulse space-y-3 pr-8" aria-hidden="true">
             <div class="h-6 w-24 rounded-full bg-zinc-200 dark:bg-zinc-700"></div>
             <div class="mt-3 h-7 w-3/4 rounded bg-zinc-200 dark:bg-zinc-700"></div>
             <div class="h-4 w-full rounded bg-zinc-100 dark:bg-zinc-800"></div>
             <div class="h-4 w-5/6 rounded bg-zinc-100 dark:bg-zinc-800"></div>
         </div>
-        @endif
     </flux:modal>
     @endisland
 </div>

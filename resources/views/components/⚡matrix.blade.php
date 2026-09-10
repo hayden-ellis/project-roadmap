@@ -8,6 +8,7 @@ use App\Support\Quarter;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Layout;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use Livewire\Component;
 
@@ -34,9 +35,9 @@ new #[Layout('components.layouts.app.header')] class extends Component
     #[Url]
     public string $selectedQuarter = '';
 
-    public string $newTitle = '';
-
-    public string $newPriority = 'medium';
+    /** Free text, matched against the title and the Jira link. */
+    #[Url(except: '')]
+    public string $search = '';
 
     public function mount(): void
     {
@@ -50,35 +51,31 @@ new #[Layout('components.layouts.app.header')] class extends Component
         $this->selectedQuarter = '';
     }
 
-    // -------------------------------------------------------------- quick add
-
-    public function quickAdd(): void
+    public function clearSearchAndFilters(): void
     {
-        $this->authorize('create', Epic::class);
-
-        $this->validate([
-            'newTitle' => 'required|string|max:255',
-            'newPriority' => 'required|in:low,medium,high,critical',
-        ], [
-            'newTitle.required' => 'Give it a name.',
-        ]);
-
-        $team = Auth::user()->currentTeam;
-        $quarter = Quarter::current();
-        $status = Status::defaultFor($team);
-
-        Epic::create([
-            'team_id' => $team->id,
-            'status_id' => $status?->id,
-            'board_order' => $status ? ((int) $status->epics()->max('board_order')) + 1 : 0,
-            'title' => $this->newTitle,
-            'priority' => $this->newPriority,
-            'start_date' => $quarter->start(),
-            'end_date' => $quarter->end(),
-        ]);
-
-        $this->newTitle = '';
+        $this->search = '';
+        $this->clearFilters();
     }
+
+    /** Drops one value from a filter -- the chip's cross. */
+    public function removeFilter(string $filter, string $id): void
+    {
+        if ($filter === 'selectedQuarter') {
+            $this->selectedQuarter = '';
+
+            return;
+        }
+
+        if (! in_array($filter, ['selectedSquadIds', 'selectedStatusIds'], true)) {
+            return;
+        }
+
+        $this->{$filter} = array_values(array_filter($this->{$filter}, fn ($v) => (string) $v !== $id));
+    }
+
+    /** The shared Add epic modal just created one; re-render to show it. */
+    #[On('epic-added')]
+    public function refresh(): void {}
 
     // ------------------------------------------------------------- the matrix
 
@@ -155,6 +152,15 @@ new #[Layout('components.layouts.app.header')] class extends Component
             $query->forQuarter($quarter);
         }
 
+        // Same match as the epics list: lowercased on both sides so it is
+        // case-insensitive on Postgres too, wildcards in the term escaped.
+        if (($term = trim($this->search)) !== '') {
+            $like = '%'.addcslashes(mb_strtolower($term), '%_\\').'%';
+            $query->where(fn ($q) => $q
+                ->whereRaw('LOWER(title) LIKE ?', [$like])
+                ->orWhereRaw('LOWER(jira_epic_url) LIKE ?', [$like]));
+        }
+
         return $query;
     }
 
@@ -219,60 +225,141 @@ new #[Layout('components.layouts.app.header')] class extends Component
 @endphp
 
 <div>
-    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6">
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-10">
         <div>
             <h1>Matrix</h1>
             <flux:text class="mt-1">Importance against urgency. Drag an epic to say where it really sits.</flux:text>
         </div>
+
+        <flux:modal.trigger name="add-epic">
+            <flux:button icon="plus" variant="primary" class="w-full sm:w-auto">Add epic</flux:button>
+        </flux:modal.trigger>
     </div>
 
-    <div class="flex flex-col lg:flex-row items-stretch lg:items-center gap-3 mb-4">
-        <flux:select multiple variant="listbox" wire:model.live="selectedSquadIds" placeholder="All Squads" class="w-full lg:w-56">
-            @foreach($squads as $squad)
-            <flux:select.option value="{{ $squad->id }}">{{ $squad->name }}</flux:select.option>
-            @endforeach
-        </flux:select>
+    @php
+        $selectedQuarterOption = $quarterOptions->first(fn ($option) => $option->key() === $selectedQuarter);
+        $hasFilters = ! empty($selectedSquadIds) || ! empty($selectedStatusIds) || $selectedQuarterOption !== null;
+        $filterCount = count($selectedSquadIds) + count($selectedStatusIds) + ($selectedQuarterOption ? 1 : 0);
+        $shown = $byQuadrant->flatten(1)->count();
+    @endphp
 
-        <flux:select multiple variant="listbox" wire:model.live="selectedStatusIds" placeholder="All Statuses" class="w-full lg:w-56">
-            @foreach($statuses as $status)
-            <flux:select.option value="{{ $status->id }}">{{ $status->name }}</flux:select.option>
-            @endforeach
-        </flux:select>
+    {{-- The same toolbar as the epics list: search is the wide control and
+         everything that narrows the matrix sits behind one Filter button. --}}
+    <div class="flex flex-col sm:flex-row sm:items-center gap-2 mb-3"
+         x-on:keydown.slash.window="if (! ['INPUT', 'TEXTAREA', 'SELECT'].includes($event.target.tagName) && ! $event.target.isContentEditable) { $event.preventDefault(); $refs.search.focus() }">
+        <flux:input x-ref="search" wire:model.live.debounce.300ms="search" icon="magnifying-glass" placeholder="Search epics"
+                    aria-label="Search epics" clearable kbd="/" size="sm" class="w-full sm:flex-1 sm:max-w-md" />
 
-        <flux:select variant="listbox" wire:model.live="selectedQuarter" class="w-full lg:w-44">
-            <flux:select.option value="">All Quarters</flux:select.option>
-            @foreach($quarterOptions as $option)
-            <flux:select.option value="{{ $option->key() }}">{{ $option->label() }}</flux:select.option>
-            @endforeach
-        </flux:select>
+        <div class="flex items-center gap-2 flex-wrap">
+            <flux:dropdown position="bottom" align="start">
+                <flux:button size="sm" icon="funnel" icon:variant="micro">
+                    Filter
+                    @if($filterCount > 0)
+                    <span class="inline-grid place-items-center align-middle min-w-[18px] h-[18px] px-1 rounded-full
+                                 bg-zinc-900 text-white dark:bg-white dark:text-zinc-900
+                                 text-[10px] font-semibold tabular-nums">{{ $filterCount }}</span>
+                    @endif
+                </flux:button>
 
-        @if(! empty($selectedSquadIds) || ! empty($selectedStatusIds) || $selectedQuarter !== '')
-        <flux:button variant="ghost" size="sm" wire:click="clearFilters" icon="x-mark" class="w-full lg:w-auto">Clear</flux:button>
+                <flux:menu class="sm:min-w-[540px]">
+                    <div class="grid grid-cols-1 sm:grid-cols-3 sm:divide-x divide-zinc-200 dark:divide-zinc-700">
+                        <div class="sm:pr-1">
+                            <flux:menu.group heading="Squad">
+                                <flux:menu.checkbox.group wire:model.live="selectedSquadIds">
+                                    @foreach($squads as $squad)
+                                    <flux:menu.checkbox value="{{ $squad->id }}">
+                                        <span class="inline-flex items-center gap-2 min-w-0">
+                                            <span class="size-2 rounded-full shrink-0" style="background-color: {{ $squad->color }}"></span>
+                                            <span class="truncate">{{ $squad->name }}</span>
+                                        </span>
+                                    </flux:menu.checkbox>
+                                    @endforeach
+                                </flux:menu.checkbox.group>
+                            </flux:menu.group>
+                        </div>
+                        <div class="sm:px-1">
+                            <flux:menu.group heading="Status">
+                                <flux:menu.checkbox.group wire:model.live="selectedStatusIds">
+                                    @foreach($statuses as $status)
+                                    <flux:menu.checkbox value="{{ $status->id }}">
+                                        <span class="inline-flex items-center gap-2 min-w-0">
+                                            <span class="size-2 rounded-full shrink-0" style="background-color: {{ $status->color }}"></span>
+                                            <span class="truncate">{{ $status->name }}</span>
+                                        </span>
+                                    </flux:menu.checkbox>
+                                    @endforeach
+                                </flux:menu.checkbox.group>
+                            </flux:menu.group>
+                        </div>
+                        <div class="sm:pl-1">
+                            {{-- One quarter at a time, so a radio rather than checkboxes. --}}
+                            <flux:menu.group heading="Quarter">
+                                <flux:menu.radio.group wire:model.live="selectedQuarter">
+                                    <flux:menu.radio value="">All quarters</flux:menu.radio>
+                                    @foreach($quarterOptions as $option)
+                                    <flux:menu.radio value="{{ $option->key() }}">{{ $option->label() }}</flux:menu.radio>
+                                    @endforeach
+                                </flux:menu.radio.group>
+                            </flux:menu.group>
+                        </div>
+                    </div>
+
+                    @if($filterCount > 0)
+                    <flux:menu.separator />
+                    <div class="flex items-center justify-between px-2 py-1">
+                        <span class="text-xs text-zinc-400 dark:text-zinc-500 tabular-nums">{{ $filterCount }} applied</span>
+                        <flux:button variant="ghost" size="xs" wire:click="clearFilters">Clear all</flux:button>
+                    </div>
+                    @endif
+                </flux:menu>
+            </flux:dropdown>
+
+            <livewire:default-squad :selected="count($selectedSquadIds) === 1 ? (int) $selectedSquadIds[0] : null" />
+        </div>
+
+        <flux:text class="sm:ml-auto text-sm whitespace-nowrap tabular-nums">{{ $shown }} {{ Str::plural('epic', $shown) }}</flux:text>
+    </div>
+
+    {{-- What is applied, in the open. Each chip removes itself. --}}
+    @if($hasFilters)
+    <div class="flex flex-wrap items-center gap-1.5 mb-3">
+        @foreach([
+            ['selectedSquadIds', 'Squad', $squads->whereIn('id', $selectedSquadIds)],
+            ['selectedStatusIds', 'Status', $statuses->whereIn('id', $selectedStatusIds)],
+        ] as [$filter, $label, $items])
+            @foreach($items as $item)
+            <span class="inline-flex items-center gap-1.5 h-6 pl-2 pr-1 rounded-md bg-zinc-100 dark:bg-zinc-800 text-xs text-zinc-600 dark:text-zinc-300"
+                  wire:key="chip-{{ $filter }}-{{ $item->id }}">
+                <span class="text-zinc-400 dark:text-zinc-500">{{ $label }}</span>
+                @if($item->color ?? null)
+                <span class="size-1.5 rounded-full" style="background-color: {{ $item->color }}"></span>
+                @endif
+                {{ $item->name }}
+                <button type="button" wire:click="removeFilter('{{ $filter }}', '{{ $item->id }}')"
+                        class="grid place-items-center size-4 rounded text-zinc-400 hover:text-zinc-900 hover:bg-zinc-200 dark:hover:text-white dark:hover:bg-zinc-700"
+                        aria-label="Remove {{ $label }} {{ $item->name }}">
+                    <flux:icon.x-mark variant="micro" class="size-3" />
+                </button>
+            </span>
+            @endforeach
+        @endforeach
+        @if($selectedQuarterOption)
+        <span class="inline-flex items-center gap-1.5 h-6 pl-2 pr-1 rounded-md bg-zinc-100 dark:bg-zinc-800 text-xs text-zinc-600 dark:text-zinc-300"
+              wire:key="chip-quarter">
+            <span class="text-zinc-400 dark:text-zinc-500">Quarter</span>
+            {{ $selectedQuarterOption->label() }}
+            <button type="button" wire:click="removeFilter('selectedQuarter', '')"
+                    class="grid place-items-center size-4 rounded text-zinc-400 hover:text-zinc-900 hover:bg-zinc-200 dark:hover:text-white dark:hover:bg-zinc-700"
+                    aria-label="Remove quarter {{ $selectedQuarterOption->label() }}">
+                <flux:icon.x-mark variant="micro" class="size-3" />
+            </button>
+        </span>
         @endif
-
-        <livewire:default-squad :selected="count($selectedSquadIds) === 1 ? (int) $selectedSquadIds[0] : null" />
+        @if($filterCount > 1)
+        <flux:button variant="ghost" size="xs" wire:click="clearFilters">Clear all</flux:button>
+        @endif
     </div>
-
-    {{-- Capture it now; it lands where its priority implies and gets dragged
-         to the truth later. --}}
-    <form wire:submit="quickAdd" class="flex flex-col sm:flex-row gap-2 mb-6">
-        <flux:input wire:model="newTitle" placeholder="Add an epic…" class="flex-1" />
-        <flux:select variant="listbox" wire:model="newPriority" class="w-full sm:w-36">
-            <flux:select.option value="low">
-                <div class="flex items-center gap-2"><flux:icon.chevron-down variant="micro" class="text-blue-600 dark:text-blue-400" /> Low</div>
-            </flux:select.option>
-            <flux:select.option value="medium">
-                <div class="flex items-center gap-2"><flux:icon.equal variant="micro" class="text-amber-600 dark:text-amber-400" /> Medium</div>
-            </flux:select.option>
-            <flux:select.option value="high">
-                <div class="flex items-center gap-2"><flux:icon.chevron-up variant="micro" class="text-orange-600 dark:text-orange-400" /> High</div>
-            </flux:select.option>
-            <flux:select.option value="critical">
-                <div class="flex items-center gap-2"><flux:icon.chevrons-up variant="micro" class="text-red-600 dark:text-red-400" /> Critical</div>
-            </flux:select.option>
-        </flux:select>
-        <flux:button type="submit" icon="plus" variant="primary">Add</flux:button>
-    </form>
+    @endif
 
     <div class="grid grid-cols-1 md:grid-cols-[1.25rem_minmax(0,1fr)_minmax(0,1fr)] gap-x-2 gap-y-3">
         <div class="hidden md:block"></div>
@@ -326,7 +413,7 @@ new #[Layout('components.layouts.app.header')] class extends Component
                 </article>
                 @empty
                 <div class="rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700 py-6 px-3 text-center">
-                    <flux:text class="text-xs">Nothing here. Drag an epic in.</flux:text>
+                    <flux:text class="text-xs">{{ ($hasFilters || trim($search) !== '') ? 'Nothing here matches.' : 'Nothing here. Drag an epic in.' }}</flux:text>
                 </div>
                 @endforelse
             </div>
@@ -334,4 +421,6 @@ new #[Layout('components.layouts.app.header')] class extends Component
         @endforeach
         @endforeach
     </div>
+
+    <livewire:quick-add-epic />
 </div>
