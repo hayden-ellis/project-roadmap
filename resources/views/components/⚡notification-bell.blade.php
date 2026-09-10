@@ -105,6 +105,10 @@ new class extends Component
                             <span class="font-semibold">{{ $data['actor'] }}</span>
                             {{ ($data['is_reply'] ?? false) ? 'replied to a thread on' : 'commented on' }}
                             <span class="font-semibold">{{ $data['epic_title'] }}</span>
+                            @elseif(($data['type'] ?? '') === 'epic_mentioned')
+                            <span class="font-semibold">{{ $data['actor'] }}</span>
+                            mentioned you on
+                            <span class="font-semibold">{{ $data['epic_title'] }}</span>
                             @elseif(($data['type'] ?? '') === 'epic_status_changed')
                             <span class="font-semibold">{{ $data['actor'] }}</span>
                             moved <span class="font-semibold">{{ $data['epic_title'] }}</span>

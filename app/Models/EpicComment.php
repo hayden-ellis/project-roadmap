@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
@@ -45,6 +46,12 @@ class EpicComment extends Model
     public function replies(): HasMany
     {
         return $this->hasMany(self::class, 'parent_id')->oldest('created_at');
+    }
+
+    /** The team members this comment names with an @ -- see App\Support\Mentions. */
+    public function mentions(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'epic_comment_mentions')->withTimestamps();
     }
 
     public function scopeRoots($query)

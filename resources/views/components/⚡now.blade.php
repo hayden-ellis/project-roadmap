@@ -1,5 +1,7 @@
 <?php
 
+use App\Actions\Comments\PostComment;
+use App\Actions\Comments\UpdateComment;
 use App\Models\Allocation;
 use App\Models\Epic;
 use App\Models\EpicComment;
@@ -9,6 +11,7 @@ use App\Models\Status;
 use App\Services\CapacityService;
 use App\Support\ColumnOrder;
 use App\Support\DefaultSquad;
+use App\Support\Mentions;
 use App\Support\Quarter;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -709,22 +712,11 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             'commentBody.required' => 'Say something first.',
         ]);
 
-        $parentId = null;
+        $parent = $this->replyingToId === null
+            ? null
+            : $epic->comments()->findOr($this->replyingToId, fn () => abort(403));
 
-        if ($this->replyingToId !== null) {
-            $parent = $epic->comments()->findOr($this->replyingToId, fn () => abort(403));
-
-            // Replying to a reply joins the same thread: threading is one
-            // level deep, so everything re-roots onto the top-level comment.
-            $parentId = $parent->parent_id ?? $parent->id;
-        }
-
-        EpicComment::create([
-            'epic_id' => $epic->id,
-            'user_id' => Auth::id(),
-            'parent_id' => $parentId,
-            'body' => $this->commentBody,
-        ]);
+        app(PostComment::class)->handle($epic, Auth::user(), $this->commentBody, $parent);
 
         $this->commentBody = '';
         $this->replyingToId = null;
@@ -776,7 +768,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             'editCommentBody.required' => 'Say something first.',
         ]);
 
-        $comment->update(['body' => $this->editCommentBody]);
+        app(UpdateComment::class)->handle($comment, $this->editCommentBody);
 
         $this->cancelEditComment();
     }
@@ -944,12 +936,13 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                 'openComments' => collect(),
                 'openReplies' => collect(),
                 'openCommentCount' => 0,
+                'mentionable' => collect(),
             ];
         }
 
         // Comments load only here, not in the board query -- the board never
         // shows them, so the cost is paid only while the flyout is open.
-        $epic->load('comments.user');
+        $epic->load(['comments.user', 'comments.mentions']);
 
         $openCrew = Allocation::where('epic_id', $epic->id)
             ->where('week_start', '>=', $week->toDateString())
@@ -980,6 +973,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             'openComments' => $epic->comments->whereNull('parent_id')->sortBy('created_at')->values(),
             'openReplies' => $epic->comments->whereNotNull('parent_id')->sortBy('created_at')->groupBy('parent_id'),
             'openCommentCount' => $epic->comments->count(),
+            // Who the composer can @-mention: members with logins.
+            'mentionable' => Mentions::choices(Auth::user()->currentTeam),
         ];
     }
 };
@@ -1697,7 +1692,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
                         @if($editingCommentId === $comment->id)
                         <form wire:submit="updateComment" class="mt-1 space-y-2">
-                            <flux:textarea wire:model="editCommentBody" rows="2" />
+                            <x-mention-box :members="$mentionable"><flux:textarea wire:model="editCommentBody" rows="2" /></x-mention-box>
                             <flux:error name="editCommentBody" />
                             <div class="flex justify-end gap-2">
                                 <flux:button type="button" size="xs" variant="ghost" wire:click="cancelEditComment">Cancel</flux:button>
@@ -1705,7 +1700,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                             </div>
                         </form>
                         @else
-                        <div class="text-sm whitespace-pre-line">{{ $comment->body }}</div>
+                        <div class="text-sm whitespace-pre-line">{{ Mentions::render($comment) }}</div>
                         @endif
 
                         @foreach($openReplies[$comment->id] ?? [] as $reply)
@@ -1730,7 +1725,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
                                 @if($editingCommentId === $reply->id)
                                 <form wire:submit="updateComment" class="mt-1 space-y-2">
-                                    <flux:textarea wire:model="editCommentBody" rows="2" />
+                                    <x-mention-box :members="$mentionable"><flux:textarea wire:model="editCommentBody" rows="2" /></x-mention-box>
                                     <flux:error name="editCommentBody" />
                                     <div class="flex justify-end gap-2">
                                         <flux:button type="button" size="xs" variant="ghost" wire:click="cancelEditComment">Cancel</flux:button>
@@ -1738,7 +1733,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                     </div>
                                 </form>
                                 @else
-                                <div class="text-sm whitespace-pre-line">{{ $reply->body }}</div>
+                                <div class="text-sm whitespace-pre-line">{{ Mentions::render($reply) }}</div>
                                 @endif
                             </div>
                         </div>
@@ -1746,7 +1741,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
                         @if($replyingToId === $comment->id || ($openReplies[$comment->id] ?? collect())->contains('id', $replyingToId))
                         <form wire:submit="addComment" class="mt-2 ml-1 pl-3 border-l border-zinc-200 dark:border-zinc-700 space-y-2">
-                            <flux:textarea wire:model="commentBody" rows="2" placeholder="Reply…" autofocus />
+                            <x-mention-box :members="$mentionable"><flux:textarea wire:model="commentBody" rows="2" placeholder="Reply…" autofocus /></x-mention-box>
                             <flux:error name="commentBody" />
                             <div class="flex justify-end gap-2">
                                 <flux:button type="button" size="xs" variant="ghost" wire:click="replyTo({{ $replyingToId }})">Cancel</flux:button>
@@ -1760,7 +1755,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
                 @if($replyingToId === null)
                 <form wire:submit="addComment" class="space-y-2">
-                    <flux:textarea wire:model="commentBody" rows="2" placeholder="Leave a comment…" />
+                    <x-mention-box :members="$mentionable"><flux:textarea wire:model="commentBody" rows="2" placeholder="Leave a comment…" /></x-mention-box>
                     <flux:error name="commentBody" />
                     <div class="flex justify-end">
                         <flux:button type="submit" size="sm" variant="filled">Comment</flux:button>

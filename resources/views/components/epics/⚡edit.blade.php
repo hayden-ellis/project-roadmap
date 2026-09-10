@@ -1,18 +1,19 @@
 <?php
 
+use App\Actions\Comments\PostComment;
+use App\Actions\Comments\UpdateComment;
 use App\Models\Allocation;
 use App\Models\Engineer;
 use App\Models\Epic;
 use App\Models\EpicComment;
 use App\Models\EpicQuarterPlan;
 use App\Models\Status;
-use App\Notifications\EpicCommented;
 use App\Services\CapacityService;
+use App\Support\Mentions;
 use App\Support\Quarter;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Notification;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Url;
 use Livewire\Attributes\Validate;
@@ -441,29 +442,11 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             'commentBody.required' => 'Say something first.',
         ]);
 
-        $parentId = null;
+        $parent = $this->replyingToId === null
+            ? null
+            : $this->epic->comments()->findOr($this->replyingToId, fn () => abort(403));
 
-        if ($this->replyingToId !== null) {
-            $parent = $this->epic->comments()->findOr($this->replyingToId, fn () => abort(403));
-
-            // Replying to a reply joins the same thread: threading is one
-            // level deep, so everything re-roots onto the top-level comment.
-            $parentId = $parent->parent_id ?? $parent->id;
-        }
-
-        $comment = EpicComment::create([
-            'epic_id' => $this->epic->id,
-            'user_id' => Auth::id(),
-            'parent_id' => $parentId,
-            'body' => $this->commentBody,
-        ]);
-
-        // Everyone already in the conversation hears about it, except the
-        // person who just spoke.
-        Notification::send(
-            $this->epic->participants()->reject(fn ($user) => $user->id === Auth::id()),
-            new EpicCommented($comment),
-        );
+        app(PostComment::class)->handle($this->epic, Auth::user(), $this->commentBody, $parent);
 
         $this->commentBody = '';
         $this->replyingToId = null;
@@ -513,7 +496,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             'editCommentBody.required' => 'Say something first.',
         ]);
 
-        $comment->update(['body' => $this->editCommentBody]);
+        app(UpdateComment::class)->handle($comment, $this->editCommentBody);
 
         $this->cancelEditComment();
     }
@@ -593,9 +576,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             ];
         });
 
-        $comments = $this->epic->comments()->with('user')->oldest('created_at')->get();
+        $comments = $this->epic->comments()->with(['user', 'mentions'])->oldest('created_at')->get();
 
         return [
+            'mentionable' => Mentions::choices($team),
             'squads' => $team->squads()->ordered()->get(),
             'categories' => $team->categories()->ordered()->get(),
             'statuses' => $team->statuses()->ordered()->get(),
@@ -933,7 +917,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
                         @if($editingCommentId === $comment->id)
                         <form wire:submit="updateComment" class="mt-1.5 space-y-2">
-                            <flux:textarea wire:model="editCommentBody" rows="3" />
+                            <x-mention-box :members="$mentionable"><flux:textarea wire:model="editCommentBody" rows="3" /></x-mention-box>
                             <flux:error name="editCommentBody" />
                             <div class="flex justify-end gap-2">
                                 <flux:button type="button" size="xs" variant="ghost" wire:click="cancelEditComment">Cancel</flux:button>
@@ -941,7 +925,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                             </div>
                         </form>
                         @else
-                        <div class="text-sm leading-relaxed whitespace-pre-line text-zinc-700 dark:text-zinc-300">{{ $comment->body }}</div>
+                        <div class="text-sm leading-relaxed whitespace-pre-line text-zinc-700 dark:text-zinc-300">{{ Mentions::render($comment) }}</div>
                         @endif
 
                         @foreach($openReplies[$comment->id] ?? [] as $reply)
@@ -965,7 +949,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
                                 @if($editingCommentId === $reply->id)
                                 <form wire:submit="updateComment" class="mt-1.5 space-y-2">
-                                    <flux:textarea wire:model="editCommentBody" rows="3" />
+                                    <x-mention-box :members="$mentionable"><flux:textarea wire:model="editCommentBody" rows="3" /></x-mention-box>
                                     <flux:error name="editCommentBody" />
                                     <div class="flex justify-end gap-2">
                                         <flux:button type="button" size="xs" variant="ghost" wire:click="cancelEditComment">Cancel</flux:button>
@@ -973,7 +957,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
                                     </div>
                                 </form>
                                 @else
-                                <div class="text-sm leading-relaxed whitespace-pre-line text-zinc-700 dark:text-zinc-300">{{ $reply->body }}</div>
+                                <div class="text-sm leading-relaxed whitespace-pre-line text-zinc-700 dark:text-zinc-300">{{ Mentions::render($reply) }}</div>
                                 @endif
                             </div>
                         </div>
@@ -981,7 +965,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
                         @if($replyingToId === $comment->id || ($openReplies[$comment->id] ?? collect())->contains('id', $replyingToId))
                         <form wire:submit="addComment" class="mt-3 pl-10 space-y-2">
-                            <flux:textarea wire:model="commentBody" rows="2" placeholder="Reply…" autofocus />
+                            <x-mention-box :members="$mentionable"><flux:textarea wire:model="commentBody" rows="2" placeholder="Reply…" autofocus /></x-mention-box>
                             <flux:error name="commentBody" />
                             <div class="flex justify-end gap-2">
                                 <flux:button type="button" size="xs" variant="ghost" wire:click="replyTo({{ $replyingToId }})">Cancel</flux:button>
@@ -997,7 +981,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
                 @if($replyingToId === null)
                 <form wire:submit="addComment" class="space-y-2">
-                    <flux:textarea wire:model="commentBody" rows="3" placeholder="Leave a comment…" />
+                    <x-mention-box :members="$mentionable"><flux:textarea wire:model="commentBody" rows="3" placeholder="Leave a comment…" /></x-mention-box>
                     <flux:error name="commentBody" />
                     <div class="flex justify-end">
                         <flux:button type="submit" size="sm" variant="filled">Comment</flux:button>
