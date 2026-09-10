@@ -7,6 +7,7 @@ use App\Models\EpicPause;
 use App\Models\EpicQuarterPlan;
 use App\Models\Status;
 use App\Services\CapacityService;
+use App\Support\ColumnOrder;
 use App\Support\DefaultSquad;
 use App\Support\Quarter;
 use Illuminate\Support\Facades\Auth;
@@ -90,6 +91,47 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     public function showAllColumns(): void
     {
         $this->hiddenColumns = [];
+    }
+
+    /**
+     * Column drag handler. The order is the user's own, laid over the team
+     * order from /statuses -- see App\Support\ColumnOrder.
+     *
+     * The drop position counts columns on screen, and hidden ones are not.
+     * So the moved column lands ahead of whichever visible column now sits
+     * at that position, or at the end, and hidden columns keep their place
+     * relative to their neighbours.
+     */
+    public function moveColumn(int $item, int $position): void
+    {
+        $moved = $this->teamStatus($item);
+        $user = Auth::user();
+        $team = $user->currentTeam;
+
+        $ordered = $this->orderedStatuses()->pluck('id')->reject(fn ($id) => $id === $moved->id)->values();
+
+        $anchor = $ordered
+            ->reject(fn ($id) => in_array((string) $id, $this->hiddenColumns, true))
+            ->values()
+            ->get($position);
+
+        $ids = $ordered->all();
+        array_splice($ids, $anchor === null ? count($ids) : $ordered->search($anchor), 0, [$moved->id]);
+
+        ColumnOrder::save($user, $team, $ids);
+    }
+
+    public function resetColumnOrder(): void
+    {
+        ColumnOrder::reset(Auth::user(), Auth::user()->currentTeam);
+    }
+
+    /** @return \Illuminate\Support\Collection<int, Status> */
+    private function orderedStatuses(): \Illuminate\Support\Collection
+    {
+        $user = Auth::user();
+
+        return ColumnOrder::apply($user, $user->currentTeam, $user->currentTeam->statuses()->ordered()->get());
     }
 
     /**
@@ -803,7 +845,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $quarter = Quarter::current();
         $week = $capacity->currentWeek();
 
-        $statuses = $team->statuses()->ordered()->get();
+        $statuses = $this->orderedStatuses();
 
         // A remembered hidden column can outlive its status. Forget it, so
         // the count on the filter button never claims a ghost.
@@ -873,6 +915,7 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             'columns' => $columns,
             'statuses' => $statuses,
             'filterCount' => ($this->squadFilter !== '' ? 1 : 0) + count($this->hiddenColumns),
+            'customOrder' => ColumnOrder::isCustom(Auth::user(), $team),
             'unfiled' => $visible->whereNull('status_id')->values(),
             'weekLabel' => $week->format('M j'),
             'quarterLabel' => $quarter->label(),
@@ -1022,6 +1065,13 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
 
                     <flux:menu.separator />
 
+                    @if($customOrder)
+                    {{-- Only offered once there is something to undo. --}}
+                    <flux:menu.item icon="arrow-uturn-left" wire:click="resetColumnOrder">
+                        Reset column order
+                    </flux:menu.item>
+                    @endif
+
                     <flux:menu.item icon="adjustments-horizontal" href="/statuses" wire:navigate>
                         Edit columns
                     </flux:menu.item>
@@ -1074,14 +1124,25 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     {{-- Columns scroll sideways rather than shrinking: a card that has been
          squeezed to nothing tells you less than one you have to scroll to. --}}
     <div class="overflow-x-auto [contain:paint] -mx-1 px-1 pb-2">
-        <div class="flex gap-3 items-start min-w-max">
+        {{-- Columns drag too, by their header, into an order that is this
+             user's alone (see moveColumn). A separate sort group from the
+             cards, so a card can never be dropped between columns and a
+             column never into a card list. Same fallback config as the cards,
+             for the same contain:paint reason. --}}
+        <div class="flex gap-3 items-start min-w-max"
+             x-sort.ghost="$wire.moveColumn($item, $position)"
+             x-sort:group="columns"
+             x-sort:config="{ forceFallback: true, fallbackTolerance: 5, fallbackOnBody: true }">
             @foreach($columns as $column)
             @php $status = $column['status']; @endphp
 
             <section class="{{ $columnWidth }} shrink-0 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50/60 dark:bg-zinc-900/50"
+                     x-sort:item="{{ $status->id }}"
                      wire:key="column-{{ $status->id }}">
 
-                <header class="px-3 pt-3 pb-2.5 border-b border-zinc-200 dark:border-zinc-700">
+                <header x-sort:handle
+                        class="px-3 pt-3 pb-2.5 border-b border-zinc-200 dark:border-zinc-700 cursor-grab active:cursor-grabbing"
+                        title="Drag to reorder columns">
                     <div class="flex items-center gap-2 min-w-0">
                         <span class="size-2.5 rounded-full shrink-0" style="background-color: {{ $status->color }}"></span>
                         <h2 class="text-[13px] font-semibold truncate text-zinc-800 dark:text-zinc-200 flex-1">
