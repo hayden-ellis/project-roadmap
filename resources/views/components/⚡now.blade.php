@@ -1007,7 +1007,8 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     };
 @endphp
 
-<div>
+{{-- Poll so the board follows the team without a reload. Livewire pauses this in background tabs. --}}
+<div wire:poll.30s>
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6">
         <div>
             <h1>Now</h1>
