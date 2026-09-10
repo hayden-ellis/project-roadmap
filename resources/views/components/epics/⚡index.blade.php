@@ -28,6 +28,10 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
     #[Url]
     public string $sortDirection = 'desc';
 
+    /** Free text, matched against the title and the Jira link. */
+    #[Url(except: '')]
+    public string $search = '';
+
     public function mount(): void
     {
         $this->selectedSquadIds = DefaultSquad::seed($this->selectedSquadIds, 'selectedSquadIds', Auth::user(), Auth::user()->currentTeam);
@@ -38,6 +42,28 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         $this->selectedSquadIds = [];
         $this->selectedStatusIds = [];
         $this->selectedCategoryIds = [];
+    }
+
+    public function clearSearchAndFilters(): void
+    {
+        $this->search = '';
+        $this->clearFilters();
+    }
+
+    /** Drops one value from one of the three filter lists -- the chip's cross. */
+    public function removeFilter(string $filter, string $id): void
+    {
+        if (! in_array($filter, ['selectedSquadIds', 'selectedStatusIds', 'selectedCategoryIds'], true)) {
+            return;
+        }
+
+        $this->{$filter} = array_values(array_filter($this->{$filter}, fn ($v) => (string) $v !== $id));
+    }
+
+    /** Picking a field from the sort menu starts it in its natural direction. */
+    public function updatedSortBy(string $field): void
+    {
+        $this->sortDirection = $field === 'title' ? 'asc' : 'desc';
     }
 
     public function setSortBy(string $field): void
@@ -127,6 +153,15 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
             $query->whereIn('status_id', $this->selectedStatusIds);
         }
 
+        // Lowercased on both sides so the match is case-insensitive on
+        // Postgres as well as SQLite; wildcards in the term are escaped.
+        if (($term = trim($this->search)) !== '') {
+            $like = '%'.addcslashes(mb_strtolower($term), '%_\\').'%';
+            $query->where(fn ($q) => $q
+                ->whereRaw('LOWER(title) LIKE ?', [$like])
+                ->orWhereRaw('LOWER(jira_epic_url) LIKE ?', [$like]));
+        }
+
         match ($this->sortBy) {
             'start_date' => $query->orderByRaw('start_date IS NULL, start_date '.$this->sortDirection),
             'end_date' => $query->orderByRaw('end_date IS NULL, end_date '.$this->sortDirection),
@@ -179,64 +214,166 @@ new #[Layout('components.layouts.app.sidebar')] class extends Component
         <flux:button href="/epics/create" icon="plus" wire:navigate class="w-full sm:w-auto">Create Epic</flux:button>
     </div>
 
-    @php $hasFilters = ! empty($selectedSquadIds) || ! empty($selectedStatusIds) || ! empty($selectedCategoryIds); @endphp
+    @php
+        $hasFilters = ! empty($selectedSquadIds) || ! empty($selectedStatusIds) || ! empty($selectedCategoryIds);
+        $filterCount = count($selectedSquadIds) + count($selectedStatusIds) + count($selectedCategoryIds);
+        $sortLabels = [
+            'created_at' => 'Created', 'updated_at' => 'Updated', 'start_date' => 'Start date',
+            'end_date' => 'End date', 'title' => 'Title', 'priority' => 'Priority',
+        ];
+    @endphp
 
-    @if(! $epics->isEmpty() || $hasFilters)
-    <div class="flex flex-col lg:flex-row items-stretch lg:items-center gap-3 mb-4">
-        <flux:select multiple variant="listbox" wire:model.live="selectedSquadIds" placeholder="All Squads" class="w-full lg:w-56">
-            @foreach($squads as $squad)
-            <flux:select.option value="{{ $squad->id }}">{{ $squad->name }}</flux:select.option>
-            @endforeach
-        </flux:select>
+    @if(! $epics->isEmpty() || $hasFilters || $search !== '')
+    {{-- Search is the wide control; everything that narrows the list further
+         sits behind one Filter button, the way the board does it. --}}
+    <div class="flex flex-col sm:flex-row sm:items-center gap-2 mb-3"
+         x-on:keydown.slash.window="if (! ['INPUT', 'TEXTAREA', 'SELECT'].includes($event.target.tagName) && ! $event.target.isContentEditable) { $event.preventDefault(); $refs.search.focus() }">
+        <flux:input x-ref="search" wire:model.live.debounce.300ms="search" icon="magnifying-glass" placeholder="Search epics"
+                    aria-label="Search epics" clearable kbd="/" size="sm" class="w-full sm:flex-1 sm:max-w-md" />
 
-        <flux:select multiple variant="listbox" wire:model.live="selectedStatusIds" placeholder="All Statuses" class="w-full lg:w-56">
-            @foreach($statuses as $status)
-            <flux:select.option value="{{ $status->id }}">{{ $status->name }}</flux:select.option>
-            @endforeach
-        </flux:select>
+        <div class="flex items-center gap-2 flex-wrap">
+            <flux:dropdown position="bottom" align="start">
+                <flux:button size="sm" icon="funnel" icon:variant="micro">
+                    Filter
+                    @if($filterCount > 0)
+                    <span class="inline-grid place-items-center align-middle min-w-[18px] h-[18px] px-1 rounded-full
+                                 bg-zinc-900 text-white dark:bg-white dark:text-zinc-900
+                                 text-[10px] font-semibold tabular-nums">{{ $filterCount }}</span>
+                    @endif
+                </flux:button>
 
-        <flux:select multiple variant="listbox" wire:model.live="selectedCategoryIds" placeholder="All Categories" class="w-full lg:w-56">
-            @foreach($categories as $category)
-            <flux:select.option value="{{ $category->id }}">{{ $category->name }}</flux:select.option>
-            @endforeach
-        </flux:select>
+                {{-- Three lists side by side, so all three can be set without
+                     closing the menu. Stacks on a narrow screen. --}}
+                <flux:menu class="sm:min-w-[540px]">
+                    <div class="grid grid-cols-1 sm:grid-cols-3 sm:divide-x divide-zinc-200 dark:divide-zinc-700">
+                        <div class="sm:pr-1">
+                            <flux:menu.group heading="Squad">
+                                <flux:menu.checkbox.group wire:model.live="selectedSquadIds">
+                                    @foreach($squads as $squad)
+                                    <flux:menu.checkbox value="{{ $squad->id }}">
+                                        <span class="inline-flex items-center gap-2 min-w-0">
+                                            <span class="size-2 rounded-full shrink-0" style="background-color: {{ $squad->color }}"></span>
+                                            <span class="truncate">{{ $squad->name }}</span>
+                                        </span>
+                                    </flux:menu.checkbox>
+                                    @endforeach
+                                </flux:menu.checkbox.group>
+                            </flux:menu.group>
+                        </div>
+                        <div class="sm:px-1">
+                            <flux:menu.group heading="Status">
+                                <flux:menu.checkbox.group wire:model.live="selectedStatusIds">
+                                    @foreach($statuses as $status)
+                                    <flux:menu.checkbox value="{{ $status->id }}">
+                                        <span class="inline-flex items-center gap-2 min-w-0">
+                                            <span class="size-2 rounded-full shrink-0" style="background-color: {{ $status->color }}"></span>
+                                            <span class="truncate">{{ $status->name }}</span>
+                                        </span>
+                                    </flux:menu.checkbox>
+                                    @endforeach
+                                </flux:menu.checkbox.group>
+                            </flux:menu.group>
+                        </div>
+                        <div class="sm:pl-1">
+                            <flux:menu.group heading="Category">
+                                <flux:menu.checkbox.group wire:model.live="selectedCategoryIds">
+                                    @foreach($categories as $category)
+                                    <flux:menu.checkbox value="{{ $category->id }}">{{ $category->name }}</flux:menu.checkbox>
+                                    @endforeach
+                                </flux:menu.checkbox.group>
+                            </flux:menu.group>
+                        </div>
+                    </div>
 
-        <flux:select wire:model.live="sortBy" class="w-full lg:w-48">
-            <flux:select.option value="created_at">Created</flux:select.option>
-            <flux:select.option value="updated_at">Updated</flux:select.option>
-            <flux:select.option value="start_date">Start Date</flux:select.option>
-            <flux:select.option value="end_date">End Date</flux:select.option>
-            <flux:select.option value="title">Title</flux:select.option>
-            <flux:select.option value="priority">Priority</flux:select.option>
-        </flux:select>
+                    @if($filterCount > 0)
+                    <flux:menu.separator />
+                    <div class="flex items-center justify-between px-2 py-1">
+                        <span class="text-xs text-zinc-400 dark:text-zinc-500 tabular-nums">{{ $filterCount }} applied</span>
+                        <flux:button variant="ghost" size="xs" wire:click="clearFilters">Clear all</flux:button>
+                    </div>
+                    @endif
+                </flux:menu>
+            </flux:dropdown>
 
-        <flux:button variant="ghost" size="sm" wire:click="setSortBy('{{ $sortBy }}')" icon="{{ $sortDirection === 'asc' ? 'arrow-up' : 'arrow-down' }}" class="w-full lg:w-auto">
-            {{ $sortDirection === 'asc' ? 'Asc' : 'Desc' }}
-        </flux:button>
+            <flux:dropdown position="bottom" align="start">
+                <flux:button size="sm" icon="bars-arrow-down" icon:variant="micro" icon:trailing="chevron-down">
+                    {{ $sortLabels[$sortBy] ?? 'Created' }}
+                </flux:button>
+                <flux:menu class="w-48">
+                    <flux:menu.group heading="Sort by">
+                        <flux:menu.radio.group wire:model.live="sortBy">
+                            @foreach($sortLabels as $field => $label)
+                            <flux:menu.radio value="{{ $field }}">{{ $label }}</flux:menu.radio>
+                            @endforeach
+                        </flux:menu.radio.group>
+                    </flux:menu.group>
+                    <flux:menu.separator />
+                    <flux:menu.radio.group wire:model.live="sortDirection">
+                        <flux:menu.radio value="asc" icon="arrow-up">Ascending</flux:menu.radio>
+                        <flux:menu.radio value="desc" icon="arrow-down">Descending</flux:menu.radio>
+                    </flux:menu.radio.group>
+                </flux:menu>
+            </flux:dropdown>
 
-        @if($hasFilters)
-        <flux:button variant="ghost" size="sm" wire:click="clearFilters" icon="x-mark" class="w-full lg:w-auto">Clear</flux:button>
-        @endif
+            <livewire:default-squad :selected="count($selectedSquadIds) === 1 ? (int) $selectedSquadIds[0] : null" />
+        </div>
 
-        <livewire:default-squad :selected="count($selectedSquadIds) === 1 ? (int) $selectedSquadIds[0] : null" />
-
-        <flux:text class="lg:ml-auto text-sm whitespace-nowrap">{{ $epics->count() }} {{ Str::plural('epic', $epics->count()) }}</flux:text>
+        <flux:text class="sm:ml-auto text-sm whitespace-nowrap tabular-nums">{{ $epics->count() }} {{ Str::plural('epic', $epics->count()) }}</flux:text>
     </div>
+
+    {{-- What is applied, in the open. Each chip removes itself. --}}
+    @if($hasFilters)
+    <div class="flex flex-wrap items-center gap-1.5 mb-3">
+        @foreach([
+            ['selectedSquadIds', 'Squad', $squads->whereIn('id', $selectedSquadIds)],
+            ['selectedStatusIds', 'Status', $statuses->whereIn('id', $selectedStatusIds)],
+            ['selectedCategoryIds', 'Category', $categories->whereIn('id', $selectedCategoryIds)],
+        ] as [$filter, $label, $items])
+            @foreach($items as $item)
+            <span class="inline-flex items-center gap-1.5 h-6 pl-2 pr-1 rounded-md bg-zinc-100 dark:bg-zinc-800 text-xs text-zinc-600 dark:text-zinc-300"
+                  wire:key="chip-{{ $filter }}-{{ $item->id }}">
+                <span class="text-zinc-400 dark:text-zinc-500">{{ $label }}</span>
+                @if($item->color ?? null)
+                <span class="size-1.5 rounded-full" style="background-color: {{ $item->color }}"></span>
+                @endif
+                {{ $item->name }}
+                <button type="button" wire:click="removeFilter('{{ $filter }}', '{{ $item->id }}')"
+                        class="grid place-items-center size-4 rounded text-zinc-400 hover:text-zinc-900 hover:bg-zinc-200 dark:hover:text-white dark:hover:bg-zinc-700"
+                        aria-label="Remove {{ $label }} {{ $item->name }}">
+                    <flux:icon.x-mark variant="micro" class="size-3" />
+                </button>
+            </span>
+            @endforeach
+        @endforeach
+        @if($filterCount > 1)
+        <flux:button variant="ghost" size="xs" wire:click="clearFilters">Clear all</flux:button>
+        @endif
+    </div>
+    @endif
     @endif
 
     @if($epics->isEmpty())
     <flux:card>
         <div class="text-center py-12">
             <flux:icon.folder class="mx-auto h-12 w-12 text-zinc-400" />
+            @php $narrowed = $hasFilters || trim($search) !== ''; @endphp
             <flux:heading size="lg" class="mt-4">
-                {{ $hasFilters ? 'No epics match your filters' : 'No epics yet' }}
+                {{ $narrowed ? 'No epics match' : 'No epics yet' }}
             </flux:heading>
             <flux:text class="mt-2">
-                {{ $hasFilters ? 'Try adjusting your filters or clear them to see all epics.' : 'Get started by creating your first epic.' }}
+                @if(trim($search) !== '')
+                Nothing has "{{ trim($search) }}" in its title or Jira link{{ $hasFilters ? ' with these filters' : '' }}.
+                @elseif($hasFilters)
+                Nothing matches these filters.
+                @else
+                Get started by creating your first epic.
+                @endif
             </flux:text>
-            @unless($hasFilters)
+            @if($narrowed)
+            <flux:button variant="ghost" class="mt-6" wire:click="clearSearchAndFilters">Clear search and filters</flux:button>
+            @else
             <flux:button href="/epics/create" variant="primary" class="mt-6" wire:navigate>Create Epic</flux:button>
-            @endunless
+            @endif
         </div>
     </flux:card>
     @else
