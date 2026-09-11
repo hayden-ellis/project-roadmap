@@ -1125,8 +1125,18 @@ new #[Layout('components.layouts.app.header')] class extends Component
 {{-- Poll so the board follows the team without a reload. Livewire pauses this in background tabs. --}}
 {{-- `opening` is set by whatever opens the panel and cleared by the content
      that arrives (see the keyed x-init inside the flyout). It lives on the
-     root so the cards and the island can both reach it. --}}
-<div wire:poll.30s x-data="{ opening: false }">
+     root so the cards and the island can both reach it.
+
+     `dragged` is how a card tells a click from a drop. The sort plugin runs
+     in fallback mode, and the click that follows a release is not always
+     swallowed, so the root watches the pointer itself: a press that travels
+     5px (the plugin's own tolerance) before it lets go was a drag, and the
+     click it leaves behind is ignored. Watched on the window, because the
+     pointer is over the clone or the gap between columns for most of a
+     drag, not over the card. --}}
+<div wire:poll.30s x-data="{ opening: false, pressX: 0, pressY: 0, dragged: false }"
+     x-on:pointerdown="pressX = $event.clientX; pressY = $event.clientY; dragged = false"
+     x-on:pointermove.window="if ($event.buttons && ! dragged && Math.hypot($event.clientX - pressX, $event.clientY - pressY) >= 5) dragged = true">
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6">
         <div>
             <h1>Now</h1>
@@ -1272,20 +1282,22 @@ new #[Layout('components.layouts.app.header')] class extends Component
 
                 {{-- An empty drop area takes no room -- the Add epic button
                      below is the empty state, and reserving blank space above
-                     it just looks broken. emptyInsertThreshold is what keeps
-                     the column droppable anyway: a drag within that many
-                     pixels of the collapsed area gets pulled in. --}}
+                     it just looks broken. While a drag is live, app.css gives
+                     a card-less zone a landing strip instead (data-drop-zone),
+                     so it can still be dropped into. Not emptyInsertThreshold:
+                     that pulls the card into any empty column within reach on
+                     every mouse move and made it flicker across the gap. --}}
                 {{-- forceFallback swaps the browser's washed-out native drag
                      image for a real clone we can style (see app.css), and the
                      tolerance means a press has to travel a few pixels before
                      it becomes a drag -- clicks stay clicks. --}}
-                <div class="p-2 space-y-2"
+                <div class="p-2 space-y-2" data-drop-zone
                      x-sort.ghost="$wire.moveEpic($item, $position, {{ $status->id }})"
                      x-sort:group="board"
                      {{-- fallbackOnBody: the clone is position:fixed, and the
                           board's contain:paint wrapper would otherwise become
                           its containing block and drag it far from the cursor. --}}
-                     x-sort:config="{ forceFallback: true, fallbackTolerance: 5, fallbackOnBody: true, emptyInsertThreshold: 64 }">
+                     x-sort:config="{ forceFallback: true, fallbackTolerance: 5, fallbackOnBody: true }">
 
                     @foreach($column['epics'] as $epic)
                     @php
@@ -1296,21 +1308,16 @@ new #[Layout('components.layouts.app.header')] class extends Component
                     {{-- The left edge is the squad, at every density. It costs no
                          horizontal room, so the one fact that would otherwise be
                          cut from a compact card survives. --}}
-                    {{-- The whole card opens the flyout. In fallback mode the
-                         sort plugin does NOT swallow the click that fires when
-                         a drag is released, so the card measures for itself:
-                         a "click" whose pointer travelled since pressing was a
-                         drop, not a click. The 5px line matches
-                         fallbackTolerance above -- below it nothing dragged,
-                         at it the press became a drag. Keyboard activation
-                         (detail 0) always opens. --}}
+                    {{-- The whole card opens the flyout, unless the press
+                         that ended here was a drag (see `dragged` on the
+                         root). Keyboard activation (detail 0) always opens:
+                         the title inside is a button, so Enter on it lands
+                         here. --}}
                     {{-- The panel slides out at once, onto a placeholder,
                          and the call is aimed at the flyout island so the
                          reply carries the flyout and not the whole board. --}}
                     <article x-sort:item="{{ $epic->id }}" wire:key="card-{{ $epic->id }}"
-                             x-data="{ downX: 0, downY: 0 }"
-                             x-on:pointerdown="downX = $event.clientX; downY = $event.clientY"
-                             x-on:click="if ($event.detail === 0 || Math.hypot($event.clientX - downX, $event.clientY - downY) < 5) { opening = true; $wire.showFlyout = true; $wire.$island('flyout').open({{ $epic->id }}) }"
+                             x-on:click="if ($event.detail === 0 || ! dragged) { opening = true; $wire.showFlyout = true; $wire.$island('flyout').open({{ $epic->id }}) }"
                              class="group relative overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900
                                     cursor-pointer select-none hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors
                                     {{ $density === 'compact' ? 'pl-3 pr-2.5 py-2' : 'pl-3.5 pr-3 pt-1.5 pb-2.5' }}">

@@ -72,6 +72,17 @@ body.sorting * {
   user-select: none !important;
 }
 
+/* A column with no cards has no drop area at rest -- the Add epic button is
+   its empty state. While a drag is live it opens a landing strip so the
+   card can be dropped there, and so a card pulled out of its column can
+   still be put back. Done here rather than with emptyInsertThreshold: that
+   option pulls the card into any empty list within reach on every mouse
+   move, and it fights the ordinary drop logic, so the card flickers
+   between columns as the pointer crosses a boundary. */
+body.sorting [data-drop-zone]:not(:has(article)) {
+  min-height: 4.5rem;
+}
+
 @layer base {
   /* Alpine hides these until it boots, so nothing flashes on first paint. */
   [x-cloak] {

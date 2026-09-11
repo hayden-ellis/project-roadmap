@@ -55,6 +55,10 @@ class EpicCommented extends Notification implements ShouldQueue
             'actor' => $this->comment->user->name,
             'excerpt' => Str::limit($this->comment->body, 120),
             'is_reply' => $this->comment->parent_id !== null,
+            // A reply to a thread you started is addressed to you, and the
+            // bell files it with mentions rather than with the rest.
+            'reply_to_you' => $this->comment->parent_id !== null
+                && $this->comment->parent?->user_id === $notifiable->getKey(),
         ];
     }
 }
