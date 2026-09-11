@@ -62,10 +62,10 @@ it('clears the tint once the thread has been opened', function () {
     $elsewhere = Epic::create(['team_id' => $this->team->id, 'title' => 'Another', 'status_id' => $this->status->id]);
     ($this->unread)(EpicCommented::class, $elsewhere->id);
 
+    // Opening the dialog puts the thread on screen, so opening is reading.
     Livewire::test('now')
-        ->call('open', $this->epic->id)
         ->assertSee('new for you')
-        ->call('setFlyoutTab', 'comments')
+        ->call('open', $this->epic->id)
         ->assertDontSee('1 comment, new for you');
 
     // Only this epic's thread was read; the other card keeps its tint.

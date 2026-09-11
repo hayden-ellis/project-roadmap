@@ -71,7 +71,7 @@ test('rendering escapes the body and wraps only real mentions', function () {
     $html = (string) Mentions::render($comment->fresh()->load('mentions'));
 
     expect($html)->toContain('&lt;b&gt;')
-        ->toContain('<span class="font-medium text-indigo-600 dark:text-indigo-400">@Priya Sharma</span>')
+        ->toContain('<span class="'.Mentions::CHIP.'">@Priya Sharma</span>')
         ->toContain('&amp; @Nobody')
         ->not->toContain('<b>');
 });
@@ -198,6 +198,15 @@ test('a deleted member is forgotten by the comments that named them', function (
     $this->priya->delete();
 
     expect($comment->fresh()->mentions)->toBeEmpty();
+});
+
+test('rendering styles the author naming themselves, though nobody is told', function () {
+    // Saved through the action, so the mentions relation leaves the author out.
+    $comment = app(App\Actions\Comments\PostComment::class)->handle($this->epic, $this->user, 'note to self: @'.$this->user->name);
+
+    expect($comment->fresh()->mentions)->toBeEmpty()
+        ->and((string) Mentions::render($comment->fresh()->load('mentions')))
+        ->toContain('<span class="'.Mentions::CHIP.'">@'.$this->user->name.'</span>');
 });
 
 test('rendering both names wraps each once', function () {

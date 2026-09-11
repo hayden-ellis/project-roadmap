@@ -7,6 +7,7 @@ use App\Models\Team;
 use App\Models\User;
 use Illuminate\Support\Collection;
 use Illuminate\Support\HtmlString;
+use WeakMap;
 
 /**
  * @mentions in comment bodies.
@@ -45,25 +46,31 @@ final class Mentions
             ->values();
     }
 
-    /** The comment body, escaped, with each resolved mention wrapped for styling. */
-    public static function render(EpicComment $comment): HtmlString
+    /**
+     * The comment body, escaped, with every member named wrapped for styling.
+     *
+     * Styled from the team, not the mentions relation: that relation is who
+     * was told, and it leaves out the author naming themselves. On the page
+     * the name should still read as a name.
+     */
+    public static function render(EpicComment $comment, ?Team $team = null): HtmlString
     {
         $html = e($comment->body);
+        $members = self::members($team ?? $comment->epic->team);
 
-        if ($comment->mentions->isNotEmpty()) {
-            $names = $comment->mentions
-                ->sortByDesc(fn ($user) => mb_strlen($user->name))
-                ->map(fn ($user) => e($user->name));
-
+        if ($members->isNotEmpty()) {
             $html = preg_replace(
-                self::pattern($names),
-                '<span class="font-medium text-indigo-600 dark:text-indigo-400">$0</span>',
+                self::pattern($members->map(fn (User $user) => e($user->name))),
+                '<span class="'.self::CHIP.'">$0</span>',
                 $html,
             );
         }
 
         return new HtmlString($html);
     }
+
+    /** How a mention reads in a comment: a quiet tinted chip. */
+    public const CHIP = 'inline rounded-md px-1 py-px font-medium bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300';
 
     /**
      * Members with logins, as the picker wants them.
@@ -74,14 +81,26 @@ final class Mentions
     {
         return self::members($team)
             ->sortBy('name', SORT_NATURAL | SORT_FLAG_CASE)
-            ->map(fn (User $user) => ['id' => $user->id, 'name' => $user->name])
+            ->map(fn (User $user) => ['id' => $user->id, 'name' => $user->name, 'avatar' => $user->profile_photo_url])
             ->values();
     }
 
-    /** @return Collection<int, User> longest name first */
+    /** @var WeakMap<Team, Collection<int, User>> */
+    private static ?WeakMap $members = null;
+
+    /**
+     * @return Collection<int, User> longest name first
+     *
+     * Remembered per Team instance: a thread renders one comment at a
+     * time, and each one asking the database for the same roster would
+     * add a query per comment. Held weakly, so it lives no longer than
+     * the model it belongs to.
+     */
     private static function members(Team $team): Collection
     {
-        return $team->allUsers()
+        self::$members ??= new WeakMap;
+
+        return self::$members[$team] ??= $team->allUsers()
             ->unique('id')
             ->sortByDesc(fn (User $user) => mb_strlen($user->name))
             ->values();

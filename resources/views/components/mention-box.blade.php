@@ -9,7 +9,7 @@
     "just below" is always near enough, and it never gets clipped.
 
     Usage: <x-mention-box :members="$mentionable"><flux:textarea .../></x-mention-box>
-    where $members is [{id, name}, ...].
+    where $members is [{id, name, avatar}, ...].
 --}}
 @props(['members'])
 
@@ -98,7 +98,7 @@
                     x-on:mousemove="index = i"
                     :class="i === index ? 'bg-zinc-100 dark:bg-zinc-700' : ''"
                     class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-sm text-zinc-800 dark:text-zinc-100">
-                <span class="text-zinc-400">@</span>
+                <img :src="member.avatar" :alt="member.name" class="size-5 shrink-0 rounded-full object-cover bg-zinc-200 dark:bg-zinc-700">
                 <span x-text="member.name" class="truncate"></span>
             </button>
         </template>

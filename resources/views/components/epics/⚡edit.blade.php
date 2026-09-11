@@ -925,7 +925,7 @@ new #[Layout('components.layouts.app.header')] class extends Component
                             </div>
                         </form>
                         @else
-                        <div class="text-sm leading-relaxed whitespace-pre-line text-zinc-700 dark:text-zinc-300">{{ Mentions::render($comment) }}</div>
+                        <div class="text-sm leading-relaxed whitespace-pre-line text-zinc-700 dark:text-zinc-300">{{ Mentions::render($comment, $this->epic->team) }}</div>
                         @endif
 
                         @foreach($openReplies[$comment->id] ?? [] as $reply)
@@ -957,7 +957,7 @@ new #[Layout('components.layouts.app.header')] class extends Component
                                     </div>
                                 </form>
                                 @else
-                                <div class="text-sm leading-relaxed whitespace-pre-line text-zinc-700 dark:text-zinc-300">{{ Mentions::render($reply) }}</div>
+                                <div class="text-sm leading-relaxed whitespace-pre-line text-zinc-700 dark:text-zinc-300">{{ Mentions::render($reply, $this->epic->team) }}</div>
                                 @endif
                             </div>
                         </div>

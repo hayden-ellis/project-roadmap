@@ -377,7 +377,7 @@ describe('the flyout', function () {
             ->assertSet('showFlyout', true)
             ->assertSet('openEpicId', $epic->id)
             ->assertSet('editTitle', 'Checkout Redesign')
-            ->assertSee('Nobody is booked on this yet');
+            ->assertSee('No one on this yet.');
     });
 
     /**

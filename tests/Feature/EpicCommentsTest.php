@@ -56,11 +56,9 @@ it('shows an epic\'s comments in the flyout', function () {
     $epic = ($this->makeEpic)();
     ($this->commentOn)($epic, body: 'Vendor confirmed the fix ships Friday.');
 
-    // The flyout opens on Details; the thread lives one tab over.
+    // The thread is part of the dialog, not a tab: it is there on open.
     Livewire::test('now')
         ->call('open', $epic->id)
-        ->assertSet('flyoutTab', 'details')
-        ->call('setFlyoutTab', 'comments')
         ->assertSee('Vendor confirmed the fix ships Friday.')
         ->tap(fn ($c) => expect($c->instance()->flyout['openComments'])->toHaveCount(1));
 });
