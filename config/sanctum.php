@@ -45,9 +45,12 @@ return [
     | considered expired. This will override any values set in the token's
     | "expires_at" attribute, but first-party sessions are not affected.
     |
+    | Tokens here are only minted for the MCP server (see mcp:token), so a
+    | forgotten one dies on its own after 90 days.
+    |
     */
 
-    'expiration' => null,
+    'expiration' => (int) env('SANCTUM_TOKEN_EXPIRATION_MINUTES', 90 * 24 * 60),
 
     /*
     |--------------------------------------------------------------------------
