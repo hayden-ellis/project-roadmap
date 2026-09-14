@@ -154,6 +154,23 @@ it('stops answering actions once the flag is revoked mid-session', function () {
     expect($this->member->tokens()->count())->toBe(1);
 });
 
+it('records the most recent login and shows it to admins', function () {
+    expect($this->member->last_login_at)->toBeNull();
+
+    $this->post('/login', ['email' => $this->member->email, 'password' => 'password'])
+        ->assertRedirect();
+
+    $stamp = $this->member->fresh()->last_login_at;
+    expect($stamp)->not->toBeNull()
+        ->and($stamp->isAfter(now()->subMinute()))->toBeTrue();
+
+    auth()->logout();
+
+    $this->actingAs($this->admin)->get('/admin/users')
+        ->assertOk()
+        ->assertSeeInOrder(['Ada Admin', 'Never', 'Mel Member', 'ago'], false);
+});
+
 it('grants and revokes super admin from the console', function () {
     $this->artisan('admin:grant', ['email' => $this->member->email])
         ->expectsOutputToContain('is now a super admin')

@@ -84,6 +84,7 @@ new #[Layout('components.layouts.app.header')] class extends Component
                 <flux:table.column>Teams</flux:table.column>
                 <flux:table.column>Security</flux:table.column>
                 <flux:table.column>Tokens</flux:table.column>
+                <flux:table.column>Last login</flux:table.column>
                 <flux:table.column>Joined</flux:table.column>
                 <flux:table.column></flux:table.column>
             </flux:table.columns>
@@ -127,6 +128,13 @@ new #[Layout('components.layouts.app.header')] class extends Component
                             </div>
                         </flux:table.cell>
                         <flux:table.cell class="tabular-nums">{{ $user->tokens_count }}</flux:table.cell>
+                        <flux:table.cell>
+                            @if ($user->last_login_at)
+                                <span title="{{ $user->last_login_at->toDayDateTimeString() }}">{{ $user->last_login_at->diffForHumans() }}</span>
+                            @else
+                                <flux:text>Never</flux:text>
+                            @endif
+                        </flux:table.cell>
                         <flux:table.cell>{{ $user->created_at->toFormattedDateString() }}</flux:table.cell>
                         <flux:table.cell align="end">
                             <flux:dropdown position="bottom" align="end">
@@ -145,7 +153,7 @@ new #[Layout('components.layouts.app.header')] class extends Component
                     </flux:table.row>
                 @empty
                     <flux:table.row>
-                        <flux:table.cell colspan="6">
+                        <flux:table.cell colspan="7">
                             <flux:text class="py-6 text-center">No users match that search.</flux:text>
                         </flux:table.cell>
                     </flux:table.row>

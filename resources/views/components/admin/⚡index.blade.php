@@ -43,6 +43,7 @@ new #[Layout('components.layouts.app.header')] class extends Component
             <flux:table.columns>
                 <flux:table.column>Name</flux:table.column>
                 <flux:table.column>Email</flux:table.column>
+                <flux:table.column>Last login</flux:table.column>
                 <flux:table.column>Joined</flux:table.column>
             </flux:table.columns>
             <flux:table.rows>
@@ -50,6 +51,7 @@ new #[Layout('components.layouts.app.header')] class extends Component
                     <flux:table.row :key="$user->id">
                         <flux:table.cell variant="strong">{{ $user->name }}</flux:table.cell>
                         <flux:table.cell>{{ $user->email }}</flux:table.cell>
+                        <flux:table.cell>{{ $user->last_login_at?->diffForHumans() ?? 'Never' }}</flux:table.cell>
                         <flux:table.cell>{{ $user->created_at->diffForHumans() }}</flux:table.cell>
                     </flux:table.row>
                 @endforeach
