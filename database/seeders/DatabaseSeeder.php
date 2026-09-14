@@ -33,6 +33,7 @@ class DatabaseSeeder extends Seeder
             'email' => 'hre0001@outlook.com',
             'password' => 'password',
         ]);
+        $user->forceFill(['is_super_admin' => true])->save();
 
         $team = $user->currentTeam;
         $team->update(['name' => 'Platform', 'week_starts_on' => 2]);

@@ -54,6 +54,15 @@ Route::middleware([
     // Replaces the old planning.index / planning.show pair with a single
     // engineer x week grid. Capacity lives on people now, not on squads.
     Route::livewire('/planning', 'planning.grid')->name('planning.grid');
+
+    // The admin panel. Non-admins get a 404 from the middleware, so the
+    // section is invisible rather than merely locked.
+    Route::middleware('super-admin')->prefix('admin')->name('admin.')->group(function () {
+        Route::livewire('/', 'admin.index')->name('index');
+        Route::livewire('/users', 'admin.users')->name('users');
+        Route::livewire('/teams', 'admin.teams')->name('teams');
+        Route::livewire('/teams/{team}', 'admin.team')->name('teams.show');
+    });
 });
 
 Route::middleware(['auth:sanctum', 'verified'])->group(function () {

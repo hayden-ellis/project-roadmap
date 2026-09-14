@@ -19,6 +19,12 @@
         <flux:menu.item :href="route('profile.show')" icon="cog-6-tooth" wire:navigate data-test="settings-link">
             {{ __('Settings') }}
         </flux:menu.item>
+
+        @can('super-admin')
+            <flux:menu.item :href="route('admin.index')" icon="shield-check" wire:navigate data-test="admin-link">
+                {{ __('Admin') }}
+            </flux:menu.item>
+        @endcan
     </flux:menu.radio.group>
 
     @if (Laravel\Jetstream\Jetstream::hasTeamFeatures())
