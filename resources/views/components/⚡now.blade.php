@@ -2,6 +2,8 @@
 
 use App\Actions\Comments\PostComment;
 use App\Actions\Comments\UpdateComment;
+use App\Actions\Epics\ChangeEpicStatus;
+use App\Actions\Epics\PauseEpic;
 use App\Models\Allocation;
 use App\Models\Epic;
 use App\Models\EpicComment;
@@ -541,13 +543,8 @@ new #[Layout('components.layouts.app.header')] class extends Component
         $status = $this->teamStatus($statusId);
         $changedColumn = $epic->status_id !== $status->id;
 
-        DB::transaction(function () use ($epic, $status, $position, $changedColumn) {
-            if ($changedColumn) {
-                $epic->update(['status_id' => $status->id]);
-
-                // Whatever the old pause was about, it ended when the epic moved.
-                $epic->pauses()->open()->update(['resumed_at' => now()]);
-            }
+        DB::transaction(function () use ($epic, $status, $position) {
+            app(ChangeEpicStatus::class)->handle($epic, $status);
 
             $this->resequence($status, $epic, $position);
         });
@@ -651,29 +648,7 @@ new #[Layout('components.layouts.app.header')] class extends Component
             'pauseReason.required' => 'Say why it stopped — that is the part the grid cannot know.',
         ]);
 
-        $capacity = CapacityService::for(Auth::user()->currentTeam);
-        $week = $capacity->currentWeek();
-        $wasStaffed = $capacity->isStaffedInWeek($epic);
-
-        DB::transaction(function () use ($epic, $week, $capacity, $wasStaffed) {
-            $this->clearFrom($epic, $week);
-
-            EpicPause::create([
-                'epic_id' => $epic->id,
-                // Stopping it now pauses it now; something already quiet keeps
-                // the date it actually went silent.
-                'paused_at' => $wasStaffed ? $week : $this->pausedSince($capacity->weeksQuiet($epic)),
-                'reason' => $this->pauseReason,
-                'superseded_by_epic_id' => $this->supersededById,
-            ]);
-
-            // Move it into the column that asks for a reason, if there is one.
-            $asks = Auth::user()->currentTeam->statuses()->where('requires_reason', true)->ordered()->first();
-
-            if ($asks && $epic->status_id !== $asks->id) {
-                $epic->update(['status_id' => $asks->id]);
-            }
-        });
+        app(PauseEpic::class)->handle($epic, $this->pauseReason, $this->supersededById ?: null);
 
         $this->panel = null;
         $this->resetForms();
@@ -853,19 +828,6 @@ new #[Layout('components.layouts.app.header')] class extends Component
             ->where('week_start', '>=', $week->format('Y-m-d'))
             ->when($engineerId, fn ($q) => $q->where('engineer_id', $engineerId))
             ->delete();
-    }
-
-    /**
-     * The week work actually stopped.
-     *
-     * A recorded pause wins because a person put that date there; otherwise it
-     * is derived by counting the silent weeks back from now.
-     */
-    private function pausedSince(int $quietWeeks): \Carbon\CarbonImmutable
-    {
-        return CapacityService::for(Auth::user()->currentTeam)
-            ->currentWeek()
-            ->subWeeks(max(0, $quietWeeks - 1));
     }
 
     /**
