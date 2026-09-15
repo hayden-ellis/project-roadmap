@@ -1265,16 +1265,14 @@ new #[Layout('components.layouts.app.header')] class extends Component
                              x-on:click="if ($event.detail === 0 || ! dragged) { opening = true; $wire.showFlyout = true; $wire.$island('flyout').open({{ $epic->id }}) }"
                              class="group relative overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900
                                     cursor-pointer select-none hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors
-                                    {{ $density === 'compact' ? 'pl-3 pr-2.5 py-2' : 'pl-3.5 pr-3 pt-1.5 pb-2.5' }}">
+                                    {{ $density === 'compact' ? 'pl-3 pr-2.5 py-2' : 'pl-3.5 pr-3 py-2.5' }}">
 
                         <span class="absolute inset-y-0 left-0 w-1" style="background-color: {{ $squadColor }}"
                               @if($epic->squad) title="{{ $epic->squad->name }}" @endif></span>
 
-                        {{-- Every card in a column is the same height. Each
-                             region below reserves its room whether or not it
-                             has anything to say, and nothing is allowed to
-                             wrap onto a second line except the title, which
-                             is clamped and padded to exactly two. --}}
+                        {{-- Nothing below wraps onto a second line except the
+                             title, which is clamped to two, and the
+                             description, likewise. --}}
 
                         @if($density === 'compact')
                         {{-- One line. Title and faces, nothing else. The row
@@ -1316,46 +1314,13 @@ new #[Layout('components.layouts.app.header')] class extends Component
                         </div>
 
                         @else
-                        {{-- Header band: whose it is on the left; the Jira key,
-                             priority and any flag on the right. The squad
-                             name gives way first if the two sides meet. --}}
-                        <div class="flex items-center justify-between gap-2 h-4">
-                            @if($epic->squad)
-                            <span class="inline-flex items-center gap-1.5 min-w-0 text-[10px] font-semibold" style="color: {{ $squadColor }}">
-                                <span class="size-1.5 rounded-full shrink-0" style="background-color: {{ $squadColor }}"></span>
-                                <span class="truncate">{{ $epic->squad->name }}</span>
-                            </span>
-                            @else
-                            <span class="text-[10px] font-medium text-zinc-400 dark:text-zinc-500 truncate">No squad</span>
-                            @endif
-
-                            <span class="inline-flex items-center gap-1.5 shrink-0 h-4">
-                                @if($epic->flag)
-                                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold {{ $toneClasses[$epic->flag['tone']] }}">
-                                    <flux:icon.exclamation-circle variant="micro" class="size-3" />
-                                    {{ $epic->flag['label'] }}
-                                </span>
-                                @endif
-
-                                {{-- click.stop inside the chip keeps a jump to
-                                     Jira from also opening the flyout. --}}
-                                @if($epic->jira_epic_url)
-                                <x-atlassian-link :url="$epic->jira_epic_url" kind="jira" />
-                                @endif
-                                @if($epic->jpd_idea_url)
-                                <x-atlassian-link :url="$epic->jpd_idea_url" kind="idea" />
-                                @endif
-
-                                <x-priority-icon :priority="$epic->priority" />
-                            </span>
-                        </div>
-
-                        {{-- Two lines, always: a one-line title leaves the
-                             second line blank rather than pulling the footer
-                             up. No handler of its own -- the click bubbles to
-                             the card's drag-aware one. --}}
+                        {{-- The title leads. The squad is already the left
+                             edge, and category and priority never earned
+                             their place on a card, so nothing sits above or
+                             beside the name. No handler of its own -- the
+                             click bubbles to the card's drag-aware one. --}}
                         <button type="button" title="{{ $epic->title }}"
-                                class="block w-full mt-0.5 text-left text-[13px] font-medium leading-tight line-clamp-2 min-h-[2.5em] text-zinc-900 dark:text-zinc-100 cursor-pointer">
+                                class="block w-full text-left text-[13px] font-semibold leading-snug line-clamp-2 text-zinc-900 dark:text-zinc-100 cursor-pointer">
                             {{ $epic->title }}
                         </button>
 
@@ -1367,24 +1332,27 @@ new #[Layout('components.layouts.app.header')] class extends Component
                         @endif
 
                         {{-- Footer: who is actually on it this week on the
-                             left -- the one fact a manual column cannot fake
-                             -- and the category on the right, on its own so
-                             it is never mistaken for the squad. --}}
-                        <div class="mt-1.5 flex items-center justify-between gap-2 min-h-8">
+                             left -- the one fact a manual column cannot fake.
+                             On the right, in one quiet grey: anything the
+                             board noticed, how much has been said, and the
+                             Jira / JPD keys for anyone who needs to jump. --}}
+                        <div class="mt-2 flex items-center justify-between gap-2 min-h-6">
                             @if($epic->crew->isEmpty())
                             <span class="inline-flex items-center gap-1.5 min-w-0 text-[11px] text-zinc-400 dark:text-zinc-500">
-                                <span class="size-8 rounded-full border border-dashed border-zinc-300 dark:border-zinc-600 shrink-0"></span>
+                                <span class="size-6 rounded-full border border-dashed border-zinc-300 dark:border-zinc-600 shrink-0"></span>
                                 <span class="truncate">No one assigned</span>
                             </span>
                             @else
                             {{-- Faces only, at every density; the name is a
-                                 hover away and the row never has to wrap. --}}
-                            <div class="flex -space-x-1.5 min-w-0">
+                                 hover away and the row never has to wrap.
+                                 Side by side rather than overlapped: at 24px
+                                 an overlap swallows the second initial. --}}
+                            <div class="flex gap-1 min-w-0">
                                 @foreach($epic->crew->take($faces) as $engineer)
-                                <x-engineer-avatar :engineer="$engineer" size="sm" class="ring-2 ring-white dark:ring-zinc-900" />
+                                <x-engineer-avatar :engineer="$engineer" size="xs" />
                                 @endforeach
                                 @if($epic->crew->count() > $faces)
-                                <flux:avatar circle size="sm" class="ring-2 ring-white dark:ring-zinc-900"
+                                <flux:avatar circle size="xs"
                                              :tooltip="$epic->crew->skip($faces)->pluck('name')->implode(', ')">
                                     +{{ $epic->crew->count() - $faces }}
                                 </flux:avatar>
@@ -1392,23 +1360,25 @@ new #[Layout('components.layouts.app.header')] class extends Component
                             </div>
                             @endif
 
-                            {{-- The tags cluster: how much has been said,
-                                 then what kind of work it is. --}}
-                            <span class="inline-flex items-center gap-2.5 shrink-0">
+                            <span class="inline-flex items-center gap-2.5 shrink-0 min-w-0">
+                                @if($epic->flag)
+                                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold {{ $toneClasses[$epic->flag['tone']] }}">
+                                    <flux:icon.exclamation-circle variant="micro" class="size-3" />
+                                    {{ $epic->flag['label'] }}
+                                </span>
+                                @endif
+
                                 @if($epic->comments_count > 0 || $epic->unreadComments)
                                 <x-card-comments :count="$epic->comments_count" :unread="$epic->unreadComments" />
                                 @endif
 
-                                @if($epic->category)
-                                <span class="inline-flex items-center gap-1 text-[10px] font-medium" style="color: {{ $epic->category->color }}">
-                                    <flux:icon.tag variant="micro" class="size-3" />
-                                    {{ $epic->category->name }}
-                                </span>
-                                @else
-                                <span class="inline-flex items-center gap-1 text-[10px] text-zinc-400 dark:text-zinc-500">
-                                    <flux:icon.tag variant="micro" class="size-3" />
-                                    No category
-                                </span>
+                                {{-- click.stop inside the link keeps a jump to
+                                     Jira from also opening the flyout. --}}
+                                @if($epic->jira_epic_url)
+                                <x-atlassian-link :url="$epic->jira_epic_url" kind="jira" variant="plain" />
+                                @endif
+                                @if($epic->jpd_idea_url)
+                                <x-atlassian-link :url="$epic->jpd_idea_url" kind="idea" variant="plain" />
                                 @endif
                             </span>
                         </div>
