@@ -1,6 +1,8 @@
 <?php
 
 use App\Models\Category;
+use App\Support\EpicHistory;
+use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Validate;
 use Livewire\Component;
@@ -60,13 +62,27 @@ new #[Layout('components.layouts.app.header')] class extends Component
             return;
         }
 
-        // Move epics to the default category before deleting
+        // Move epics to the default category before deleting. The move is
+        // one query, which Eloquent does not announce, so each epic's
+        // history is written by hand first.
         $defaultCategory = auth()->user()->currentTeam->categories()->default()->first();
-        if ($defaultCategory) {
-            $this->category->epics()->update(['category_id' => $defaultCategory->id]);
-        }
 
-        $this->category->delete();
+        DB::transaction(function () use ($defaultCategory) {
+            if ($defaultCategory) {
+                EpicHistory::recordBulk(
+                    $this->category->epics()->get(),
+                    'category_id',
+                    $this->category->id,
+                    $this->category->name,
+                    $defaultCategory->id,
+                    $defaultCategory->name,
+                );
+
+                $this->category->epics()->update(['category_id' => $defaultCategory->id]);
+            }
+
+            $this->category->delete();
+        });
 
         $this->redirect('/categories', navigate: true);
     }

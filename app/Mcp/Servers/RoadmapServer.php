@@ -15,7 +15,7 @@ class RoadmapServer extends Server
 {
     protected string $name = 'Project Roadmap';
 
-    protected string $version = '1.1.0';
+    protected string $version = '1.2.0';
 
     protected string $instructions = <<<'MARKDOWN'
         Access to the Project Roadmap app: the epics (projects) a team is
@@ -29,10 +29,11 @@ class RoadmapServer extends Server
         2. `list-epics` (optionally filtered by squad, status or quarter) for a
            summary of each epic including its Jira and JPD keys.
         3. `get-epic` for the full picture of one epic: description, quarter
-           plans, engineers, pauses and the comment thread.
+           plans, engineers, pauses, the comment thread and its recent history.
 
-        With a write token you can also change things, and every change is
-        made as the token's owner, notifying their teammates as the app would:
+        With a write token you can also change things. Every change is made
+        as the token's owner, notifies their teammates as the app would, and
+        is written to the epic's history marked as coming through MCP:
         - `add-comment` posts a comment or reply on an epic.
         - `edit-comment` rewrites a comment the token owner wrote.
         - `update-epic` changes a title, description, priority or Jira / JPD link.

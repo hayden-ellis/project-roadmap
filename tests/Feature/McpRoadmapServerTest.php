@@ -561,3 +561,51 @@ it('explains unknown statuses and foreign epics when moving', function () {
     expect($this->checkout->fresh()->status_id)->toBe($this->inProgress->id)
         ->and($this->foreignEpic->fresh()->status_id)->toBeNull();
 });
+
+it('writes history for an MCP update as the token owner, marked as MCP', function () {
+    withToken($this->user, ['mcp:read', 'mcp:write']);
+
+    RoadmapServer::actingAs($this->user)->tool(UpdateEpic::class, [
+        'id' => $this->checkout->id,
+        'title' => 'Checkout v2',
+        'priority' => 'critical',
+    ])->assertOk();
+
+    $row = $this->checkout->activities()->first();
+
+    expect($row->event)->toBe('updated')
+        ->and($row->source)->toBe('mcp')
+        ->and($row->user_id)->toBe($this->user->id)
+        ->and(array_keys($row->diff))->toBe(['title', 'priority']);
+});
+
+it('writes a status move from MCP with the column names', function () {
+    withToken($this->user, ['mcp:read', 'mcp:write']);
+
+    RoadmapServer::actingAs($this->user)
+        ->tool(SetEpicStatus::class, ['id' => $this->referrals->id, 'status' => 'in progress'])
+        ->assertOk();
+
+    $row = $this->referrals->activities()->first();
+
+    expect($row->source)->toBe('mcp')
+        ->and($row->lines()[0]['text'])->toBe('moved it from Paused to In Progress');
+});
+
+it('includes recent history in the epic detail', function () {
+    withToken($this->user, ['mcp:read', 'mcp:write']);
+
+    RoadmapServer::actingAs($this->user)
+        ->tool(UpdateEpic::class, ['id' => $this->checkout->id, 'title' => 'Checkout v2'])
+        ->assertOk();
+
+    $payload = mcpPayload(RoadmapServer::actingAs($this->user)->tool(GetEpic::class, ['id' => $this->checkout->id]));
+
+    expect($payload['history'][0])->toMatchArray([
+        'actor' => $this->user->name,
+        'source' => 'mcp',
+        'event' => 'updated',
+        'summary' => 'renamed it from "Checkout Redesign" to "Checkout v2"',
+    ])->and($payload['history'][0]['changes']['title']['to'])->toBe('Checkout v2')
+        ->and(end($payload['history'])['event'])->toBe('created');
+});

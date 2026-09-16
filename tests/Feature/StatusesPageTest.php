@@ -7,6 +7,7 @@ use Livewire\Livewire;
 
 beforeEach(function () {
     $user = User::factory()->withPersonalTeam()->create();
+    $this->user = $user;
     $this->team = $user->currentTeam;
 
     $this->make = fn (string $name, array $attributes = []) => Status::create([
@@ -155,6 +156,50 @@ describe('deleting a status', function () {
             ->call('delete');
 
         expect($doing->fresh()->is_default)->toBeTrue();
+    });
+
+    it('writes a history row for every epic it moves', function () {
+        $backlog = ($this->make)('Backlog');
+        $doing = ($this->make)('In progress');
+
+        $moved = collect(['Wallet Top-ups', 'Receipts'])->map(fn ($title) => Epic::create([
+            'team_id' => $this->team->id, 'title' => $title, 'status_id' => $backlog->id,
+        ]));
+        $untouched = Epic::create(['team_id' => $this->team->id, 'title' => 'Refunds', 'status_id' => $doing->id]);
+
+        Livewire::test('statuses.index')
+            ->call('confirmDeletion', $backlog->id)
+            ->set('reassignTo', (string) $doing->id)
+            ->call('delete');
+
+        $moved->each(function (Epic $epic) use ($backlog, $doing) {
+            $row = $epic->activities()->first();
+
+            expect($row->diff['status_id'])->toBe([
+                'from' => $backlog->id, 'to' => $doing->id,
+                'from_label' => 'Backlog', 'to_label' => 'In progress',
+            ])->and($row->user_id)->toBe($this->user->id)
+                ->and($row->source)->toBe('web')
+                ->and($row->lines()[0]['text'])->toBe('moved it from Backlog to In progress');
+        });
+
+        // Only the creation row: nothing happened to it.
+        expect($untouched->activities()->count())->toBe(1);
+    });
+
+    it('records the move to nowhere when no status is chosen', function () {
+        $backlog = ($this->make)('Backlog');
+        ($this->make)('In progress');
+
+        $epic = Epic::create(['team_id' => $this->team->id, 'title' => 'Wallet Top-ups', 'status_id' => $backlog->id]);
+
+        Livewire::test('statuses.index')
+            ->call('confirmDeletion', $backlog->id)
+            ->set('reassignTo', '')
+            ->call('delete');
+
+        expect($epic->fresh()->status_id)->toBeNull()
+            ->and($epic->activities()->first()->lines()[0]['text'])->toBe('took it out of Backlog');
     });
 
     it('refuses to delete the only status', function () {

@@ -6,6 +6,7 @@ use App\Actions\Epics\ChangeEpicStatus;
 use App\Actions\Epics\PauseEpic;
 use App\Models\Allocation;
 use App\Models\Epic;
+use App\Models\EpicActivity;
 use App\Models\EpicComment;
 use App\Models\EpicPause;
 use App\Models\EpicQuarterPlan;
@@ -186,6 +187,12 @@ new #[Layout('components.layouts.app.header')] class extends Component
 
     public string $editCommentBody = '';
 
+    /** Which of the flyout's two threads is showing: 'comments' or 'history'. */
+    public string $flyoutTab = 'comments';
+
+    /** History shows its latest rows until asked for everything. */
+    public bool $showAllHistory = false;
+
     // The open epic's own fields, editable in place. Like the edit page,
     // each one writes as it changes -- there is no save button.
 
@@ -360,7 +367,14 @@ new #[Layout('components.layouts.app.header')] class extends Component
         $this->replyingToId = null;
         $this->editingCommentId = null;
         $this->editCommentBody = '';
+        $this->flyoutTab = 'comments';
+        $this->showAllHistory = false;
         $this->resetErrorBag();
+    }
+
+    public function showAllHistory(): void
+    {
+        $this->showAllHistory = true;
     }
 
     // -------------------------------------------------- editing in the flyout
@@ -984,6 +998,8 @@ new #[Layout('components.layouts.app.header')] class extends Component
                 'openComments' => collect(),
                 'openReplies' => collect(),
                 'openCommentCount' => 0,
+                'activities' => collect(),
+                'activityCount' => 0,
                 'mentionable' => collect(),
                 'candidateEpics' => collect(),
             ];
@@ -1014,6 +1030,11 @@ new #[Layout('components.layouts.app.header')] class extends Component
             'openComments' => $epic->comments->whereNull('parent_id')->sortBy('created_at')->values(),
             'openReplies' => $epic->comments->whereNotNull('parent_id')->sortBy('created_at')->groupBy('parent_id'),
             'openCommentCount' => $epic->comments->count(),
+            // History, newest first, capped until the tab asks for the rest.
+            'activities' => $epic->activities()->with('user')
+                ->when(! $this->showAllHistory, fn ($q) => $q->limit(EpicActivity::RECENT))
+                ->get(),
+            'activityCount' => $epic->activities()->count(),
             // Who the composer can @-mention: members with logins.
             'mentionable' => Mentions::choices($team),
             // Where a pause can send the capacity. Only the pause form lists it.
@@ -1445,6 +1466,7 @@ new #[Layout('components.layouts.app.header')] class extends Component
             'openComments' => $openComments, 'openReplies' => $openReplies,
             'openCommentCount' => $openCommentCount, 'mentionable' => $mentionable,
             'candidateEpics' => $candidateEpics,
+            'activities' => $activities, 'activityCount' => $activityCount,
         ] = $this->flyout;
 
         // The dialog wears the squad's colour along its top edge, the way
@@ -1789,18 +1811,38 @@ new #[Layout('components.layouts.app.header')] class extends Component
                     </div>
                 </div>
 
-                {{-- Comments: the part of the record that only reads as prose.
-                     One level of threading -- replies sit under their root behind
-                     a left rule, and replying to a reply joins the same thread. --}}
-                <div class="mt-6 pt-5 border-t border-zinc-100 dark:border-zinc-800">
-                    <div class="flex items-center gap-2">
-                        <span class="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">Comments</span>
-                        @if($openCommentCount > 0)
-                        <span class="text-[10.5px] font-bold px-1.5 py-px rounded-full bg-zinc-100 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-300">{{ $openCommentCount }}</span>
-                        @endif
-                    </div>
+                {{-- Two threads on one epic: what people said, and what they
+                     did. Comments are one level deep -- replies sit under
+                     their root behind a left rule, and replying to a reply
+                     joins the same thread. History is written by the Epic
+                     model as it saves (see App\Support\EpicHistory). --}}
+                {{-- The group is a one-column grid: the tab bar on row one,
+                     both panels on row two, the idle one kept in layout but
+                     invisible. The dialog is then as tall as the taller thread
+                     and does not jump when the tab changes. Flux finds panels
+                     among the group's direct children, so no wrapper. --}}
+                <flux:tab.group class="mt-6 pt-4 border-t border-zinc-100 dark:border-zinc-800 grid! grid-cols-1">
+                    <flux:tabs wire:model="flyoutTab" size="sm" class="h-8! [grid-area:1/1]">
+                        <flux:tab name="comments" :accent="false" class="text-[13px]!">
+                            Comments
+                            @if($openCommentCount > 0)
+                            <span class="text-[10.5px] font-bold px-1.5 py-px rounded-full bg-zinc-100 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-300">{{ $openCommentCount }}</span>
+                            @endif
+                        </flux:tab>
+                        <flux:tab name="history" :accent="false" class="text-[13px]!">
+                            History
+                            @if($activityCount > 0)
+                            <span class="text-[10.5px] font-bold px-1.5 py-px rounded-full bg-zinc-100 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-300">{{ $activityCount }}</span>
+                            @endif
+                        </flux:tab>
+                    </flux:tabs>
 
-                    <div class="mt-4 space-y-4">
+                    <flux:tab.panel name="history" class="pt-4 [grid-area:2/1] [&:not([data-selected])]:block! [&:not([data-selected])]:invisible [&:not([data-selected])]:pointer-events-none">
+                        <x-activity-list :activities="$activities" :total="$activityCount" />
+                    </flux:tab.panel>
+
+                    <flux:tab.panel name="comments" class="pt-4 [grid-area:2/1] [&:not([data-selected])]:block! [&:not([data-selected])]:invisible [&:not([data-selected])]:pointer-events-none">
+                    <div class="space-y-4">
                         @if($openComments->isEmpty())
                         <flux:text class="text-sm">Nothing said yet. Leave the first comment.</flux:text>
                         @endif
@@ -1896,12 +1938,14 @@ new #[Layout('components.layouts.app.header')] class extends Component
                         </div>
                         @endforeach
                     </div>
-                </div>
+                    </flux:tab.panel>
+                </flux:tab.group>
             </div>
 
             {{-- The composer, pinned. While a reply box is open up in the
                  thread this steps aside, so there is only ever one place to
-                 type. --}}
+                 type. It stays through the History tab: reading what changed
+                 is a fine moment to say something about it. --}}
             <div class="shrink-0 border-t border-zinc-100 dark:border-zinc-800 px-7 py-4 bg-white dark:bg-zinc-800">
                 @if($replyingToId === null)
                 <form wire:submit="addComment" class="space-y-2.5">

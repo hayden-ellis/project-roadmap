@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Status;
+use App\Support\EpicHistory;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Livewire\Attributes\Layout;
@@ -167,6 +168,18 @@ new #[Layout('components.layouts.app.header')] class extends Component
         $target = $this->reassignTo ? $this->teamStatus((int) $this->reassignTo) : null;
 
         DB::transaction(function () use ($status, $target) {
+            // One query moves the whole column, which Eloquent does not
+            // announce, so each epic's history is written by hand first --
+            // with the column's name, since it is about to be gone.
+            EpicHistory::recordBulk(
+                $status->epics()->get(),
+                'status_id',
+                $status->id,
+                $status->name,
+                $target?->id,
+                $target?->name,
+            );
+
             $status->epics()->update(['status_id' => $target?->id]);
 
             if ($status->is_default && $target) {

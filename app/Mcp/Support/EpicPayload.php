@@ -3,6 +3,7 @@
 namespace App\Mcp\Support;
 
 use App\Models\Epic;
+use App\Models\EpicActivity;
 use App\Models\EpicComment;
 use App\Models\EpicPause;
 use App\Models\EpicQuarterPlan;
@@ -95,7 +96,29 @@ class EpicPayload
                 ->map(fn (EpicComment $comment) => static::comment($comment))
                 ->values()
                 ->all(),
+            // The last few things that happened to it, newest first: field
+            // and status changes with who made them and from where.
+            'history' => $epic->activities
+                ->take(20)
+                ->map(fn (EpicActivity $activity) => static::activity($activity))
+                ->values()
+                ->all(),
             'created_at' => $epic->created_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected static function activity(EpicActivity $activity): array
+    {
+        return [
+            'at' => $activity->created_at?->toIso8601String(),
+            'actor' => $activity->actorName(),
+            'source' => $activity->source,
+            'event' => $activity->event,
+            'summary' => collect($activity->lines())->pluck('text')->implode('; '),
+            'changes' => $activity->diff,
         ];
     }
 

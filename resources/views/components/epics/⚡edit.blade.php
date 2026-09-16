@@ -5,6 +5,7 @@ use App\Actions\Comments\UpdateComment;
 use App\Models\Allocation;
 use App\Models\Engineer;
 use App\Models\Epic;
+use App\Models\EpicActivity;
 use App\Models\EpicComment;
 use App\Models\EpicQuarterPlan;
 use App\Models\Status;
@@ -89,6 +90,17 @@ new #[Layout('components.layouts.app.header')] class extends Component
     public ?int $editingCommentId = null;
 
     public string $editCommentBody = '';
+
+    /** Which thread the bottom panel shows: 'comments' or 'history'. */
+    public string $tab = 'comments';
+
+    /** History shows its latest rows until asked for everything. */
+    public bool $showAllHistory = false;
+
+    public function showAllHistory(): void
+    {
+        $this->showAllHistory = true;
+    }
 
     public function mount(Epic $epic): void
     {
@@ -578,6 +590,10 @@ new #[Layout('components.layouts.app.header')] class extends Component
 
         $comments = $this->epic->comments()->with(['user', 'mentions'])->oldest('created_at')->get();
 
+        $activities = $this->epic->activities()->with('user')
+            ->when(! $this->showAllHistory, fn ($q) => $q->limit(EpicActivity::RECENT))
+            ->get();
+
         return [
             'mentionable' => Mentions::choices($team),
             'squads' => $team->squads()->ordered()->get(),
@@ -598,6 +614,8 @@ new #[Layout('components.layouts.app.header')] class extends Component
             'openPause' => $this->epic->openPause(),
             'openComments' => $comments->whereNull('parent_id')->values(),
             'openReplies' => $comments->whereNotNull('parent_id')->groupBy('parent_id'),
+            'activities' => $activities,
+            'activityCount' => $this->epic->activities()->count(),
         ];
     }
 };
@@ -890,12 +908,36 @@ new #[Layout('components.layouts.app.header')] class extends Component
                 @endif
             </div>
 
-            {{-- Comments: the part of the record that only reads as prose.
-                 One level of threading -- replying to a reply joins the same
-                 thread. Editing and deleting stay with the author. --}}
-            <div class="{{ $panel }} p-5 space-y-4">
-                <div class="{{ $micro }}">Comments</div>
+            {{-- Two threads on one epic: what people said, and what they
+                 did. Comments are one level deep -- replying to a reply joins
+                 the same thread -- and editing and deleting stay with the
+                 author. History is written by the Epic model as it saves. --}}
+            {{-- A one-column grid: tab bar on row one, both panels on row
+                 two with the idle one invisible rather than gone, so the block
+                 keeps the taller thread's height and the page does not shift
+                 when the tab changes. Flux finds panels among the group's
+                 direct children, so no wrapper. --}}
+            <flux:tab.group class="{{ $panel }} p-5 grid! grid-cols-1">
+                <flux:tabs wire:model="tab" size="sm" class="h-8! [grid-area:1/1]">
+                    <flux:tab name="comments" :accent="false" class="text-[13px]!">
+                        Comments
+                        @if($openComments->isNotEmpty())
+                        <span class="text-[10.5px] font-bold px-1.5 py-px rounded-full bg-zinc-100 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-300">{{ $openComments->count() + $openReplies->flatten()->count() }}</span>
+                        @endif
+                    </flux:tab>
+                    <flux:tab name="history" :accent="false" class="text-[13px]!">
+                        History
+                        @if($activityCount > 0)
+                        <span class="text-[10.5px] font-bold px-1.5 py-px rounded-full bg-zinc-100 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-300">{{ $activityCount }}</span>
+                        @endif
+                    </flux:tab>
+                </flux:tabs>
 
+                <flux:tab.panel name="history" class="pt-5 [grid-area:2/1] [&:not([data-selected])]:block! [&:not([data-selected])]:invisible [&:not([data-selected])]:pointer-events-none">
+                    <x-activity-list :activities="$activities" :total="$activityCount" size="sm" />
+                </flux:tab.panel>
+
+                <flux:tab.panel name="comments" class="pt-5 space-y-4 [grid-area:2/1] [&:not([data-selected])]:block! [&:not([data-selected])]:invisible [&:not([data-selected])]:pointer-events-none">
                 @forelse($openComments as $comment)
                 <div wire:key="comment-{{ $comment->id }}" class="flex gap-3">
                     <flux:avatar circle size="sm" :name="$comment->user->name" :src="$comment->user->profile_photo_url" />
@@ -988,7 +1030,8 @@ new #[Layout('components.layouts.app.header')] class extends Component
                     </div>
                 </form>
                 @endif
-            </div>
+                </flux:tab.panel>
+            </flux:tab.group>
         </div>
 
         {{-- ──────────────────────────────────────────────────── rail: the epic's facts --}}

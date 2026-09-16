@@ -4,6 +4,7 @@ use App\Models\Allocation;
 use App\Models\Category;
 use App\Models\Engineer;
 use App\Models\Epic;
+use App\Models\EpicActivity;
 use App\Models\EpicQuarterPlan;
 use App\Models\Squad;
 use App\Models\Status;
@@ -288,4 +289,44 @@ it('reloads squads and points when the quarter changes', function () {
         ->set('quarter', $next->key())
         ->assertSet('squad_ids', [$this->squad->id])
         ->assertSet("planned_points.{$this->squad->id}", 55);
+});
+
+it('writes a history row for each field saved', function () {
+    Livewire::test('epics.edit', ['epic' => $this->epic])
+        ->set('priority', 'critical')
+        ->set('status_id', (string) $this->shipped->id);
+
+    $rows = $this->epic->activities()->where('event', 'updated')->reorder('id')->get();
+
+    expect($rows)->toHaveCount(2)
+        ->and($rows[0]->lines()[0]['text'])->toBe('changed priority from Medium to Critical')
+        ->and($rows[1]->diff['status_id']['from_label'])->toBe('Backlog')
+        ->and($rows[1]->diff['status_id']['to_label'])->toBe('Shipped')
+        ->and($rows[1]->user_id)->toBe($this->user->id);
+});
+
+it('shows the epic\'s history on its tab', function () {
+    EpicActivity::factory()->create([
+        'epic_id' => $this->epic->id,
+        'user_id' => $this->user->id,
+        'diff' => ['title' => ['from' => 'Smart Charging', 'to' => 'Smart Charging Scheduler']],
+    ]);
+
+    Livewire::test('epics.edit', ['epic' => $this->epic])
+        ->assertSet('tab', 'comments')
+        ->assertSee('renamed it from "Smart Charging" to "Smart Charging Scheduler"')
+        ->assertSee('created this epic');
+});
+
+it('caps history until asked for all of it', function () {
+    EpicActivity::factory()->count(EpicActivity::RECENT + 5)->create([
+        'epic_id' => $this->epic->id, 'user_id' => $this->user->id,
+    ]);
+
+    Livewire::test('epics.edit', ['epic' => $this->epic])
+        ->assertViewHas('activities', fn ($rows) => $rows->count() === EpicActivity::RECENT)
+        ->assertViewHas('activityCount', EpicActivity::RECENT + 6)
+        ->assertSee('Show all '.(EpicActivity::RECENT + 6))
+        ->call('showAllHistory')
+        ->assertViewHas('activities', fn ($rows) => $rows->count() === EpicActivity::RECENT + 6);
 });

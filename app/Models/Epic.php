@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Notifications\EpicStatusChanged;
 use App\Support\AtlassianLink;
+use App\Support\EpicHistory;
 use App\Support\Quarter;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -63,6 +64,12 @@ class Epic extends Model
                     ->max('matrix_order')) + 1;
             }
         });
+
+        // Every save is remembered before anyone is told about it. Only the
+        // tracked columns count, so a drag that just renumbers the board
+        // writes nothing (see App\Support\EpicHistory).
+        static::created(fn (Epic $epic) => EpicHistory::recordCreated($epic));
+        static::updated(fn (Epic $epic) => EpicHistory::recordUpdated($epic));
 
         // Every path that files an epic somewhere else -- a board drag, the
         // edit page, a pause or complete action -- lands here, so the people
@@ -162,6 +169,12 @@ class Epic extends Model
     public function comments(): HasMany
     {
         return $this->hasMany(EpicComment::class);
+    }
+
+    /** What happened to this epic, newest first. */
+    public function activities(): HasMany
+    {
+        return $this->hasMany(EpicActivity::class)->latest('created_at')->latest('id');
     }
 
     /** The squads this epic is planned into, across all quarters. */

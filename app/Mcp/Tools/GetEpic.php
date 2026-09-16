@@ -18,8 +18,9 @@ class GetEpic extends Tool
     protected string $description = <<<'MARKDOWN'
         Everything about one epic: the summary fields from `list-epics` plus its
         description, importance/urgency quadrant, the engineers allocated to it
-        and for how many weeks, its pause history, and the full comment thread
-        with authors and timestamps. Use the `id` from `list-epics`.
+        and for how many weeks, its pause history, the full comment thread
+        with authors and timestamps, and the last 20 changes to its fields and
+        status (who, when, from where). Use the `id` from `list-epics`.
     MARKDOWN;
 
     public function handle(Request $request): Response
@@ -43,6 +44,7 @@ class GetEpic extends Tool
                 'allocations.engineer.squad',
                 'comments.user',
                 'comments.replies.user',
+                'activities.user',
             ])
             ->find($validated['id']);
 

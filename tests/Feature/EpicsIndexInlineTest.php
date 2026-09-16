@@ -107,3 +107,21 @@ it('shows who is booked on the epic this week', function () {
     Livewire::test('epics.index')
         ->assertSee('Sarah Chen');
 });
+
+it('remembers an inline rename in the epic\'s history', function () {
+    Livewire::test('epics.index')
+        ->call('saveTitle', $this->epic->id, 'Smarter Charging');
+
+    $row = $this->epic->activities()->first();
+
+    expect($row->diff)->toBe(['title' => ['from' => 'Smart Charging Scheduler', 'to' => 'Smarter Charging']])
+        ->and($row->user_id)->toBe($this->user->id);
+});
+
+it('remembers an inline status change by name', function () {
+    Livewire::test('epics.index')
+        ->call('setStatus', $this->epic->id, $this->building->id);
+
+    expect($this->epic->activities()->first()->lines()[0]['text'])
+        ->toBe('moved it from Backlog to Building');
+});
