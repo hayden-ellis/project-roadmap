@@ -25,6 +25,8 @@ Route::middleware([
     // the other sections of the same settings shell.
     Route::view('/settings/security', 'settings.security')->name('settings.security');
     Route::view('/settings/appearance', 'settings.appearance')->name('settings.appearance');
+    // Personal tokens for the MCP server: minted here, used from Claude Code.
+    Route::livewire('/settings/claude-code', 'settings.claude-code')->name('settings.claude-code');
 
     Route::livewire('/now', 'now')->name('now');
 

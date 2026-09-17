@@ -18,6 +18,7 @@
             <flux:navlist.item :href="route('profile.show')" :current="request()->routeIs('profile.show')" wire:navigate>{{ __('Profile') }}</flux:navlist.item>
             <flux:navlist.item :href="route('settings.security')" :current="request()->routeIs('settings.security')" wire:navigate>{{ __('Security') }}</flux:navlist.item>
             <flux:navlist.item :href="route('settings.appearance')" :current="request()->routeIs('settings.appearance')" wire:navigate>{{ __('Appearance') }}</flux:navlist.item>
+            <flux:navlist.item :href="route('settings.claude-code')" :current="request()->routeIs('settings.claude-code')" wire:navigate>{{ __('Claude Code') }}</flux:navlist.item>
             @if (Laravel\Jetstream\Jetstream::hasTeamFeatures() && $team)
                 <flux:navlist.item :href="route('teams.show', $team->id)" :current="request()->routeIs('teams.*')" wire:navigate>{{ __('Team') }}</flux:navlist.item>
             @endif

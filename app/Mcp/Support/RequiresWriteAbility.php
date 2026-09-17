@@ -8,8 +8,9 @@ use Laravel\Mcp\Response;
 /**
  * Write tools sit behind the same route as the read tools, so the route's
  * `mcp:read` check is not enough on its own. Each write tool asks for the
- * `mcp:write` ability, which `php artisan mcp:token --write` grants and a
- * plain read token never carries.
+ * `mcp:write` ability, which a read-and-write token from the Claude Code
+ * settings page (or `php artisan mcp:token --write`) grants and a plain
+ * read token never carries.
  */
 trait RequiresWriteAbility
 {
@@ -20,7 +21,7 @@ trait RequiresWriteAbility
         }
 
         return Response::error(
-            'This token is read-only. Mint one with write access using `php artisan mcp:token you@example.com --write`.'
+            'This token is read-only. Mint one with read and write access from Settings → Claude Code in the app.'
         );
     }
 }
