@@ -34,6 +34,7 @@ class Epic extends Model
         'is_recurring',
         'jira_epic_url',
         'jpd_idea_url',
+        'release_percent',
     ];
 
     protected function casts(): array
@@ -44,6 +45,7 @@ class Epic extends Model
             'is_recurring' => 'boolean',
             'board_order' => 'integer',
             'matrix_order' => 'integer',
+            'release_percent' => 'integer',
         ];
     }
 

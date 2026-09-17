@@ -170,6 +170,7 @@ new #[Layout('components.layouts.app.header')] class extends Component
         match ($this->sortBy) {
             'start_date' => $query->orderByRaw('start_date IS NULL, start_date '.$this->sortDirection),
             'end_date' => $query->orderByRaw('end_date IS NULL, end_date '.$this->sortDirection),
+            'release_percent' => $query->orderByRaw('release_percent IS NULL, release_percent '.$this->sortDirection),
             'priority' => $query->orderByRaw("CASE priority WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 WHEN 'low' THEN 4 END ".($this->sortDirection === 'desc' ? 'ASC' : 'DESC')),
             'title' => $query->orderBy('title', $this->sortDirection),
             'updated_at' => $query->orderBy('updated_at', $this->sortDirection),
@@ -226,7 +227,7 @@ new #[Layout('components.layouts.app.header')] class extends Component
         $filterCount = count($selectedSquadIds) + count($selectedStatusIds) + count($selectedCategoryIds);
         $sortLabels = [
             'created_at' => 'Created', 'updated_at' => 'Updated', 'start_date' => 'Start date',
-            'end_date' => 'End date', 'title' => 'Title', 'priority' => 'Priority',
+            'end_date' => 'End date', 'title' => 'Title', 'priority' => 'Priority', 'release_percent' => 'Release %',
         ];
     @endphp
 
@@ -423,6 +424,14 @@ new #[Layout('components.layouts.app.header')] class extends Component
                     <th scope="col" class="w-40 px-3 py-2.5 text-left">Squad</th>
                     <th scope="col" class="w-36 px-3 py-2.5 text-left">Engineers</th>
                     <th scope="col" class="w-40 px-3 py-2.5 text-right">Points</th>
+                    <th scope="col" class="w-28 px-3 py-2.5 text-right">
+                        <button type="button" wire:click="setSortBy('release_percent')" class="inline-flex items-center gap-1 hover:text-zinc-900 dark:hover:text-zinc-100 {{ $sortBy === 'release_percent' ? 'text-zinc-900 dark:text-zinc-100' : '' }}">
+                            Release
+                            @if($sortBy === 'release_percent')
+                            <flux:icon name="{{ $sortDirection === 'asc' ? 'arrow-up' : 'arrow-down' }}" variant="micro" class="size-3 text-accent" />
+                            @endif
+                        </button>
+                    </th>
                     <th scope="col" class="w-10 px-2 py-2.5"><span class="sr-only">Open</span></th>
                 </tr>
             </thead>
@@ -569,6 +578,20 @@ new #[Layout('components.layouts.app.header')] class extends Component
                                 {{ $staffed }}<span class="text-zinc-400 dark:text-zinc-500"> / {{ $planned }}</span>
                             </span>
                         </div>
+                    </td>
+
+                    {{-- release: how much has reached users, if anyone has said --}}
+                    <td class="px-3">
+                        @if($epic->release_percent !== null)
+                        <div class="flex items-center justify-end gap-2" title="{{ $epic->release_percent }}% released">
+                            <span class="h-[3px] w-12 rounded-full bg-zinc-200 dark:bg-zinc-700 overflow-hidden">
+                                <span class="block h-full rounded-full {{ $epic->release_percent >= 100 ? 'bg-emerald-500' : 'bg-accent' }}" style="width: {{ $epic->release_percent }}%"></span>
+                            </span>
+                            <span class="font-mono tabular-nums text-xs whitespace-nowrap {{ $epic->release_percent >= 100 ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-700 dark:text-zinc-300' }}">{{ $epic->release_percent }}%</span>
+                        </div>
+                        @else
+                        <div class="text-right text-xs text-zinc-400 dark:text-zinc-500">—</div>
+                        @endif
                     </td>
 
                     {{-- open the full page --}}

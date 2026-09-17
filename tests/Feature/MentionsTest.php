@@ -218,3 +218,27 @@ test('rendering both names wraps each once', function () {
     expect(substr_count($html, '<span'))->toBe(2)
         ->and($html)->toContain('>@Priya Sharma-Lee</span> and <span');
 });
+
+// -------------------------------------------------------------------- links
+
+test('rendering turns a pasted link into one that opens in a new tab', function () {
+    $comment = EpicComment::create(['epic_id' => $this->epic->id, 'user_id' => $this->user->id, 'body' => 'Spec is at https://acme.atlassian.net/wiki/x?a=1&b=2, ask @Priya Sharma.']);
+
+    $html = (string) Mentions::render($comment->fresh());
+
+    expect($html)
+        ->toContain('<a href="https://acme.atlassian.net/wiki/x?a=1&amp;b=2" target="_blank" rel="noopener noreferrer" class="'.Mentions::LINK.'">https://acme.atlassian.net/wiki/x?a=1&amp;b=2</a>, ask ')
+        ->toContain('<span class="'.Mentions::CHIP.'">@Priya Sharma</span>.')
+        ->not->toContain('<a href="https://acme.atlassian.net/wiki/x?a=1&amp;b=2,');
+});
+
+test('rendering leaves the punctuation around a link out of it and escapes the rest', function () {
+    $comment = EpicComment::create(['epic_id' => $this->epic->id, 'user_id' => $this->user->id, 'body' => '(see http://example.com/a) <b>not bold</b> https://x.y/z']);
+
+    $html = (string) Mentions::render($comment->fresh());
+
+    expect($html)
+        ->toContain('(see <a href="http://example.com/a" target="_blank"')
+        ->toContain('</a>) &lt;b&gt;not bold&lt;/b&gt; <a href="https://x.y/z" target="_blank"')
+        ->not->toContain('<b>');
+});

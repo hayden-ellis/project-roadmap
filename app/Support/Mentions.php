@@ -47,27 +47,60 @@ final class Mentions
     }
 
     /**
-     * The comment body, escaped, with every member named wrapped for styling.
+     * The comment body, escaped, with every member named wrapped for styling
+     * and every bare URL made clickable.
      *
      * Styled from the team, not the mentions relation: that relation is who
      * was told, and it leaves out the author naming themselves. On the page
      * the name should still read as a name.
+     *
+     * Links open in a new tab: the comment is on a board or a flyout the
+     * reader was in the middle of, and a pasted Jira or doc link is a
+     * side-trip, not a destination.
      */
     public static function render(EpicComment $comment, ?Team $team = null): HtmlString
     {
-        $html = e($comment->body);
         $members = self::members($team ?? $comment->epic->team);
 
-        if ($members->isNotEmpty()) {
-            $html = preg_replace(
-                self::pattern($members->map(fn (User $user) => e($user->name))),
-                '<span class="'.self::CHIP.'">$0</span>',
-                $html,
-            );
+        $names = $members->isNotEmpty()
+            ? self::pattern($members->map(fn (User $user) => e($user->name)))
+            : null;
+
+        // Prose and links are escaped separately: an "&" inside a link has
+        // to stay a working "&", while a "<" in prose has to stay text.
+        // With DELIM_CAPTURE the pieces alternate prose, link, prose, ...
+        $pieces = preg_split(self::URL, $comment->body, -1, PREG_SPLIT_DELIM_CAPTURE);
+
+        $html = '';
+
+        foreach ($pieces as $i => $piece) {
+            if ($i % 2 === 1) {
+                $html .= '<a href="'.e($piece).'" target="_blank" rel="noopener noreferrer" class="'.self::LINK.'">'.e($piece).'</a>';
+
+                continue;
+            }
+
+            $text = e($piece);
+
+            if ($names !== null) {
+                $text = preg_replace($names, '<span class="'.self::CHIP.'">$0</span>', $text);
+            }
+
+            $html .= $text;
         }
 
         return new HtmlString($html);
     }
+
+    /**
+     * A bare http(s) URL, as people paste them: it runs to the next space or
+     * quote, and the closing punctuation of the sentence around it is left
+     * out -- "see https://x.y/z." links to z, not "z.".
+     */
+    private const URL = '~(https?://[^\s<>"\']*[^\s<>"\'.,;:!?)\]])~i';
+
+    /** How a link reads in a comment: underlined in the accent, and free to break anywhere so a long URL cannot widen the thread. */
+    public const LINK = 'text-accent underline underline-offset-2 decoration-accent/40 hover:decoration-accent break-all';
 
     /** How a mention reads in a comment: a quiet tinted chip. */
     public const CHIP = 'inline rounded-md px-1 py-px font-medium bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300';

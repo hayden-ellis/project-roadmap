@@ -420,6 +420,38 @@ it('edits only the token owner\'s own comments', function () {
         ->and($foreign->fresh()->body)->toBe('Elsewhere');
 });
 
+it('sets and clears the release percentage', function () {
+    withToken($this->user, ['mcp:read', 'mcp:write']);
+
+    $response = RoadmapServer::actingAs($this->user)->tool(UpdateEpic::class, [
+        'id' => $this->checkout->id,
+        'release_percent' => 60,
+    ]);
+
+    $response->assertOk();
+
+    expect(mcpPayload($response)['epic']['release_percent'])->toBe(60)
+        ->and($this->checkout->fresh()->release_percent)->toBe(60);
+
+    RoadmapServer::actingAs($this->user)->tool(UpdateEpic::class, [
+        'id' => $this->checkout->id,
+        'release_percent' => null,
+    ])->assertOk();
+
+    expect($this->checkout->fresh()->release_percent)->toBeNull();
+});
+
+it('refuses a release percentage outside 0 to 100', function () {
+    withToken($this->user, ['mcp:read', 'mcp:write']);
+
+    RoadmapServer::actingAs($this->user)->tool(UpdateEpic::class, [
+        'id' => $this->checkout->id,
+        'release_percent' => 140,
+    ])->assertHasErrors(['release_percent is a whole number from 0 to 100.']);
+
+    expect($this->checkout->fresh()->release_percent)->toBeNull();
+});
+
 it('updates the epic fields it is given and leaves the rest alone', function () {
     withToken($this->user, ['mcp:read', 'mcp:write']);
 

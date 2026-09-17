@@ -17,9 +17,10 @@ class UpdateEpic extends Tool
     use RequiresWriteAbility, ResolvesTeam;
 
     protected string $description = <<<'MARKDOWN'
-        Change an epic's title, description, priority, or its Jira / Jira
-        Product Discovery links. Only the fields you pass are touched; pass an
-        empty string to clear a description or link. To move an epic between
+        Change an epic's title, description, priority, release percentage,
+        or its Jira / Jira Product Discovery links. Only the fields you pass
+        are touched; pass an empty string to clear a description or link, or
+        null to clear the release percentage. To move an epic between
         statuses use set-epic-status instead. Needs a token with write access.
     MARKDOWN;
 
@@ -42,8 +43,10 @@ class UpdateEpic extends Tool
             'priority' => ['sometimes', 'in:low,medium,high,critical'],
             'jira_epic_url' => ['sometimes', 'nullable', 'string', 'max:2048'],
             'jpd_idea_url' => ['sometimes', 'nullable', 'string', 'max:2048'],
+            'release_percent' => ['sometimes', 'nullable', 'integer', 'between:0,100'],
         ], [
             'title.max' => 'The title may be at most 255 characters.',
+            'release_percent.*' => 'release_percent is a whole number from 0 to 100.',
         ]);
 
         $epic = $team->epics()->find($validated['id']);
@@ -72,6 +75,10 @@ class UpdateEpic extends Tool
             $changes['priority'] = $validated['priority'];
         }
 
+        if (array_key_exists('release_percent', $validated)) {
+            $changes['release_percent'] = $validated['release_percent'];
+        }
+
         foreach (['jira_epic_url' => 'Jira', 'jpd_idea_url' => 'Product Discovery'] as $field => $label) {
             if (! array_key_exists($field, $validated)) {
                 continue;
@@ -87,7 +94,7 @@ class UpdateEpic extends Tool
         }
 
         if ($changes === []) {
-            return Response::error('Nothing to change. Pass at least one of title, description, priority, jira_epic_url or jpd_idea_url.');
+            return Response::error('Nothing to change. Pass at least one of title, description, priority, release_percent, jira_epic_url or jpd_idea_url.');
         }
 
         $epic->update($changes);
@@ -118,6 +125,10 @@ class UpdateEpic extends Tool
                 ->description('The full https:// link to the Jira epic. Empty string clears it.'),
             'jpd_idea_url' => $schema->string()
                 ->description('The full https:// link to the Jira Product Discovery idea. Empty string clears it.'),
+            'release_percent' => $schema->integer()
+                ->min(0)
+                ->max(100)
+                ->description('How much of the epic has reached users, 0-100. Null clears it.'),
         ];
     }
 }

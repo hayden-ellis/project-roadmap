@@ -35,6 +35,7 @@ class EpicActivity extends Model
         'is_recurring',
         'jira_epic_url',
         'jpd_idea_url',
+        'release_percent',
     ];
 
     protected $fillable = [
@@ -164,6 +165,12 @@ class EpicActivity extends Model
             'is_recurring' => self::fragment($to ? 'marked it recurring' : 'marked it one-off'),
 
             'jira_epic_url', 'jpd_idea_url' => $this->linkLine($field === 'jira_epic_url' ? 'Jira epic' : 'JPD idea', $from, $to),
+
+            'release_percent' => match (true) {
+                $from === null => self::fragment("set release to {$to}%", null, "{$to}%"),
+                $to === null => self::fragment('cleared the release %', "{$from}%", null),
+                default => self::fragment("moved release from {$from}% to {$to}%", "{$from}%", "{$to}%"),
+            },
 
             default => self::fragment("changed {$field}", self::stringify($from), self::stringify($to)),
         };

@@ -34,7 +34,7 @@ use Livewire\Component;
 new #[Layout('components.layouts.app.header')] class extends Component
 {
     /** Fields with a validation rule attached; is_recurring has none. */
-    private const VALIDATED = ['title', 'description', 'status_id', 'category_id', 'priority', 'start_date', 'end_date', 'jira_epic_url', 'jpd_idea_url'];
+    private const VALIDATED = ['title', 'description', 'status_id', 'category_id', 'priority', 'start_date', 'end_date', 'jira_epic_url', 'jpd_idea_url', 'release_percent'];
 
     public Epic $epic;
 
@@ -66,6 +66,10 @@ new #[Layout('components.layouts.app.header')] class extends Component
 
     #[Validate('nullable|url:https|max:2048', message: 'Paste the full https:// link from Product Discovery.')]
     public string $jpd_idea_url = '';
+
+    /** How much has reached users, 0-100; null until someone says. */
+    #[Validate('nullable|integer|min:0|max:100', message: 'Release is a whole number from 0 to 100.')]
+    public ?int $release_percent = null;
 
     /** Scopes the spine and the squad plan. Everything else is quarter-agnostic. */
     #[Url]
@@ -119,6 +123,7 @@ new #[Layout('components.layouts.app.header')] class extends Component
         $this->end_date = $epic->end_date?->format('Y-m-d') ?? '';
         $this->jira_epic_url = $epic->jira_epic_url ?? '';
         $this->jpd_idea_url = $epic->jpd_idea_url ?? '';
+        $this->release_percent = $epic->release_percent;
 
         $this->quarter = $this->quarter ?: $this->openingQuarter()->key();
 
@@ -194,6 +199,7 @@ new #[Layout('components.layouts.app.header')] class extends Component
             'is_recurring' => fn () => $this->is_recurring,
             'jira_epic_url' => fn () => trim($this->jira_epic_url) ?: null,
             'jpd_idea_url' => fn () => trim($this->jpd_idea_url) ?: null,
+            'release_percent' => fn () => $this->release_percent,
         ];
 
         if (! isset($columns[$property])) {
@@ -1113,6 +1119,25 @@ new #[Layout('components.layouts.app.header')] class extends Component
                 @error('end_date')
                 <div class="px-5 py-2.5"><flux:error name="end_date" /></div>
                 @enderror
+
+                {{-- How much has reached users. Typed in, not derived: the
+                     team's own read on it, kept beside the dates it answers. --}}
+                <div class="px-5 py-3">
+                    <div class="flex items-center gap-3">
+                        <label for="epic-release" class="w-20 shrink-0 text-[13px] text-zinc-500 dark:text-zinc-400">Released</label>
+                        <div class="flex-1 flex items-center gap-2">
+                            <flux:input id="epic-release" type="number" size="sm" class="w-24" min="0" max="100" step="1"
+                                        placeholder="—" wire:model.live.debounce.600ms="release_percent" />
+                            <span class="text-[13px] text-zinc-400 dark:text-zinc-500">%</span>
+                            @if($epic->release_percent !== null)
+                            <span class="ml-auto h-[3px] w-20 rounded-full bg-zinc-200 dark:bg-zinc-700 overflow-hidden">
+                                <span class="block h-full rounded-full {{ $epic->release_percent >= 100 ? 'bg-emerald-500' : 'bg-accent' }}" style="width: {{ $epic->release_percent }}%"></span>
+                            </span>
+                            @endif
+                        </div>
+                    </div>
+                    <flux:error name="release_percent" />
+                </div>
 
                 {{-- Pasted pointers into Atlassian, nothing synced. The chip
                      next to a saved link is the one-click way out. --}}

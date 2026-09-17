@@ -35,6 +35,7 @@ class EpicPayload
             'jira_epic_url' => $epic->jira_epic_url,
             'jpd_idea_key' => $epic->jpdIdeaKey(),
             'jpd_idea_url' => $epic->jpd_idea_url,
+            'release_percent' => $epic->release_percent,
             'squads' => $epic->quarterPlans
                 ->map(fn (EpicQuarterPlan $plan) => $plan->squad?->name)
                 ->filter()

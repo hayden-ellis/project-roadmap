@@ -212,6 +212,9 @@ new #[Layout('components.layouts.app.header')] class extends Component
 
     public string $editJpdIdeaUrl = '';
 
+    /** How much has reached users, 0-100; null until someone says. */
+    public ?int $editReleasePercent = null;
+
     // ------------------------------------------------------------- the flyout
 
     public function open(int $epicId): void
@@ -391,6 +394,7 @@ new #[Layout('components.layouts.app.header')] class extends Component
         $this->editPlannedPoints = $plan?->planned_points;
         $this->editJiraEpicUrl = $epic->jira_epic_url ?? '';
         $this->editJpdIdeaUrl = $epic->jpd_idea_url ?? '';
+        $this->editReleasePercent = $epic->release_percent;
     }
 
     public function updatedEditDescription(): void
@@ -483,6 +487,21 @@ new #[Layout('components.layouts.app.header')] class extends Component
         );
 
         $epic->update(['jpd_idea_url' => trim($this->editJpdIdeaUrl) ?: null]);
+
+        $this->refreshBoard();
+    }
+
+    public function updatedEditReleasePercent(): void
+    {
+        $epic = $this->teamEpic($this->openEpicId);
+        $this->authorize('update', $epic);
+
+        $this->validate(
+            ['editReleasePercent' => 'nullable|integer|min:0|max:100'],
+            ['editReleasePercent.*' => 'Release is a whole number from 0 to 100.'],
+        );
+
+        $epic->update(['release_percent' => $this->editReleasePercent]);
 
         $this->refreshBoard();
     }
@@ -1393,6 +1412,17 @@ new #[Layout('components.layouts.app.header')] class extends Component
                                 <x-card-comments :count="$epic->comments_count" :unread="$epic->unreadComments" />
                                 @endif
 
+                                {{-- How much has shipped, when anyone has
+                                     said: a sliver of bar and the number. --}}
+                                @if($epic->release_percent !== null)
+                                <span class="inline-flex items-center gap-1.5 shrink-0" title="{{ $epic->release_percent }}% released">
+                                    <span class="h-[3px] w-6 rounded-full bg-zinc-200 dark:bg-zinc-700 overflow-hidden">
+                                        <span class="block h-full rounded-full {{ $epic->release_percent >= 100 ? 'bg-emerald-500' : 'bg-accent' }}" style="width: {{ $epic->release_percent }}%"></span>
+                                    </span>
+                                    <span class="text-[10px] font-medium tabular-nums {{ $epic->release_percent >= 100 ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400 dark:text-zinc-500' }}">{{ $epic->release_percent }}%</span>
+                                </span>
+                                @endif
+
                                 {{-- click.stop inside the link keeps a jump to
                                      Jira from also opening the flyout. --}}
                                 @if($epic->jira_epic_url)
@@ -1576,7 +1606,7 @@ new #[Layout('components.layouts.app.header')] class extends Component
                     <span class="flex-1"></span>
 
                     <span class="text-[11px] font-medium text-zinc-400 shrink-0" wire:loading.delay
-                          wire:target="editTitle, editCategoryId, editSquadId, editPriority, editDescription, editJiraEpicUrl, editJpdIdeaUrl">Saving…</span>
+                          wire:target="editTitle, editCategoryId, editSquadId, editPriority, editDescription, editJiraEpicUrl, editJpdIdeaUrl, editReleasePercent">Saving…</span>
 
                     {{-- Where it sits on the board. Read-only here: moving
                          is a drag on the board, the one way it happens. --}}
@@ -1668,6 +1698,34 @@ new #[Layout('components.layouts.app.header')] class extends Component
                                 @endforeach
                             </flux:menu.radio.group>
                         </flux:menu>
+                    </flux:dropdown>
+
+                    {{-- How much has reached users. The chip reads the
+                         number; the popover is where it gets typed. --}}
+                    <flux:dropdown position="bottom" align="start">
+                        @if($openEpic->release_percent !== null)
+                        <button type="button" class="{{ $chip }}" title="{{ $openEpic->release_percent }}% released">
+                            <span class="h-[3px] w-8 rounded-full bg-zinc-200 dark:bg-zinc-700 overflow-hidden">
+                                <span class="block h-full rounded-full {{ $openEpic->release_percent >= 100 ? 'bg-emerald-500' : 'bg-accent' }}" style="width: {{ $openEpic->release_percent }}%"></span>
+                            </span>
+                            <span class="tabular-nums">{{ $openEpic->release_percent }}%</span>
+                            <flux:icon.chevron-down variant="micro" class="text-zinc-400" />
+                        </button>
+                        @else
+                        <button type="button" class="{{ $ghostChip }}">
+                            <flux:icon.plus variant="micro" class="size-3.5" />
+                            Release %
+                        </button>
+                        @endif
+                        <flux:popover class="w-56 p-3! space-y-2">
+                            <span class="{{ $micro }}">Released</span>
+                            <div class="flex items-center gap-2">
+                                <flux:input type="number" size="sm" min="0" max="100" step="1" placeholder="—" clearable
+                                            wire:model.live.debounce.600ms="editReleasePercent" />
+                                <span class="text-sm text-zinc-400">%</span>
+                            </div>
+                            <flux:error name="editReleasePercent" />
+                        </flux:popover>
                     </flux:dropdown>
 
                     <span class="w-px h-5 mx-1 bg-zinc-200 dark:bg-zinc-700"></span>

@@ -141,7 +141,7 @@ final class EpicHistory
         }
 
         return match ($field) {
-            'status_id', 'category_id' => (int) $value,
+            'status_id', 'category_id', 'release_percent' => (int) $value,
             'is_recurring' => (bool) $value,
             'start_date', 'end_date' => substr((string) $value, 0, 10),
             default => $value,
